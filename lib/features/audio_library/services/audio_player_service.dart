@@ -125,17 +125,20 @@ class AudioPlayerService {
   StreamSubscription? _compSub;
   StreamSubscription? _errSub;
 
-  final _positionController = StreamController<Duration>.broadcast();
-  final _durationController = StreamController<Duration>.broadcast();
-  final _playingController = StreamController<bool>.broadcast();
-  final _completedController = StreamController<void>.broadcast();
-  final _errorController = StreamController<String>.broadcast();
+  final _positionController = StreamController<Duration>.broadcast(sync: true);
+  final _durationController = StreamController<Duration>.broadcast(sync: true);
+  final _playingController = StreamController<bool>.broadcast(sync: true);
+  final _completedController = StreamController<void>.broadcast(sync: true);
+  final _errorController = StreamController<String>.broadcast(sync: true);
 
   Stream<Duration> get positionStream => _positionController.stream;
   Stream<Duration> get durationStream => _durationController.stream;
   Stream<bool> get playingStream => _playingController.stream;
   Stream<void> get completedStream => _completedController.stream;
   Stream<String> get errorStream => _errorController.stream;
+
+  String? _openedPath;
+  String? get openedPath => _openedPath;
 
   bool _isPlaying = false;
   bool get isPlaying => _isPlaying;
@@ -214,11 +217,6 @@ class AudioPlayerService {
     _playSub = _engine.playingStream.listen((playing) {
       _isPlaying = playing;
       _playingController.add(playing);
-      if (playing) {
-        _mediaService.requestAudioFocus();
-      } else {
-        _mediaService.abandonAudioFocus();
-      }
     });
 
     _compSub = _engine.completedStream.listen((completed) {
@@ -260,15 +258,26 @@ class AudioPlayerService {
       // Coordinate with video: pause active video before audio starts
       MediaCoordinator.instance.onAudioStarting();
     }
-    await _engine.open(path, play: play);
+    _openedPath = path;
+    _isPlaying = play;
+    try {
+      await _engine.open(path, play: play);
+    } catch (e) {
+      _openedPath = null;
+      _isPlaying = false;
+      _errorController.add(e.toString());
+      rethrow;
+    }
   }
 
   Future<void> play() async {
     MediaCoordinator.instance.onAudioStarting();
+    _isPlaying = true;
     await _engine.play();
   }
 
   Future<void> pause() async {
+    _isPlaying = false;
     await _engine.pause();
   }
 
@@ -277,6 +286,7 @@ class AudioPlayerService {
   }
 
   Future<void> stop() async {
+    _openedPath = null;
     await _engine.stop();
     await stopNotification();
   }

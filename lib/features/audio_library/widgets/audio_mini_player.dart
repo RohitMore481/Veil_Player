@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../main/providers/media_section_provider.dart';
 import '../../player/providers/active_video_provider.dart';
 import '../providers/audio_player_provider.dart';
 import '../screens/now_playing_screen.dart';
@@ -12,12 +11,6 @@ class AudioMiniPlayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Hide mini-player if not in music section (e.g. video section active)
-    final mediaSection = ref.watch(mediaSectionProvider);
-    if (mediaSection != MediaSection.music) {
-      return const SizedBox.shrink();
-    }
-
     // Hide mini-player if full-screen video is currently active
     final activeVideo = ref.watch(activeVideoProvider);
     if (activeVideo != null) {
@@ -162,18 +155,29 @@ class AudioMiniPlayer extends ConsumerWidget {
                       ),
                       const SizedBox(width: 12),
                       IconButton(
-                        icon: Icon(
-                          queueState.isPlaying
-                              ? Icons.pause_circle_filled_rounded
-                              : Icons.play_circle_fill_rounded,
-                          color: theme.colorScheme.primary,
-                          size: 34,
-                        ),
+                        icon: queueState.isLoading
+                            ? SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              )
+                            : Icon(
+                                queueState.isPlaying
+                                    ? Icons.pause_circle_filled_rounded
+                                    : Icons.play_circle_fill_rounded,
+                                color: theme.colorScheme.primary,
+                                size: 34,
+                              ),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        onPressed: () {
-                          ref.read(audioPlayerProvider.notifier).togglePlayPause();
-                        },
+                        onPressed: queueState.isLoading
+                            ? null
+                            : () {
+                                ref.read(audioPlayerProvider.notifier).togglePlayPause();
+                              },
                       ),
                       const SizedBox(width: 8),
                       IconButton(

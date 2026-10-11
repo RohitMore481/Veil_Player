@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/audio_item.dart';
@@ -59,6 +60,7 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
   }
 
   int _queueIdCounter = 0;
+  int _activeOperationId = 0;
 
   AudioPlayerNotifier(
     this._playerService,
@@ -100,7 +102,10 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
     });
 
     _playSub = _playerService.playingStream.listen((playing) {
-      state = state.copyWith(isPlaying: playing);
+      state = state.copyWith(
+        isPlaying: playing,
+        isLoading: false,
+      );
       _updateNotification();
     });
 
@@ -110,7 +115,11 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
 
     _errSub = _playerService.errorStream.listen((err) {
       _consecutiveFailures++;
-      state = state.copyWith(errorMessage: err, isLoading: false);
+      state = state.copyWith(
+        errorMessage: err,
+        isLoading: false,
+        isPlaying: false,
+      );
       // Advance on error to prevent being stuck on broken file, up to max limit
       if (_consecutiveFailures >= _maxConsecutiveFailures) {
         _consecutiveFailures = 0;
@@ -132,6 +141,11 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
       final settings = await _storageService.loadSettings();
       final savedState = await _storageService.loadQueueState();
 
+      // Guard: If user already tapped a track or populated queue before disk read finished, do not overwrite!
+      if (state.queue.isNotEmpty || _activeOperationId > 0) {
+        return;
+      }
+
       if (savedState != null) {
         final List<QueueItem> queue =
             (savedState['queue'] as List<QueueItem>?) ?? [];
@@ -146,6 +160,11 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
         List<int> shuffleIndices = [];
         if (isShuffle && queue.isNotEmpty) {
           shuffleIndices = _buildShuffleIndices(queue.length, currentIndex);
+        }
+
+        // Check again after asynchronous computation
+        if (state.queue.isNotEmpty || _activeOperationId > 0) {
+          return;
         }
 
         state = state.copyWith(
@@ -252,6 +271,8 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
   Future<void> _playTrackAtIndex(int index, {Duration? startPosition}) async {
     if (index < 0 || index >= state.queue.length) return;
 
+    final operationId = ++_activeOperationId;
+
     state = state.copyWith(
       currentIndex: index,
       isLoading: true,
@@ -261,18 +282,47 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
     final track = state.queue[index].track;
 
     try {
+      // Pre-validate file for local filesystem audio when present on disk
+      if (!track.path.startsWith('http://') &&
+          !track.path.startsWith('https://') &&
+          !track.path.startsWith('asset://') &&
+          !track.path.startsWith('content://')) {
+        final file = File(track.path);
+        if (file.existsSync()) {
+          try {
+            if (file.lengthSync() == 0) {
+              throw Exception('File is empty (0 bytes): ${track.path}');
+            }
+          } catch (e) {
+            if (e is! Exception || !e.toString().contains('empty')) {
+              throw Exception('Cannot read file ($e): ${track.path}');
+            }
+            rethrow;
+          }
+        }
+      }
+
       await _playerService.open(track.path, play: true);
+      if (operationId != _activeOperationId) return;
+
       _recordRecentlyPlayed(track);
       if (startPosition != null && startPosition > Duration.zero) {
         await _playerService.seek(startPosition);
       }
-      state = state.copyWith(isLoading: false, isPlaying: true);
+      if (operationId != _activeOperationId) return;
+
+      state = state.copyWith(
+        isLoading: false,
+        isPlaying: _playerService.isPlaying,
+      );
       _updateNotification();
       _saveQueue();
     } catch (e) {
+      if (operationId != _activeOperationId) return;
       _consecutiveFailures++;
       state = state.copyWith(
         isLoading: false,
+        isPlaying: false,
         errorMessage: 'Unable to play "${track.title}": $e',
       );
       if (_consecutiveFailures < _maxConsecutiveFailures && state.hasNext) {
@@ -288,28 +338,46 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
 
   Future<void> play() async {
     if (state.isEmpty) return;
+    if (state.isLoading) return;
+
     if (state.currentIndex == -1) {
       await _playTrackAtIndex(0);
       return;
     }
+
+    final current = state.currentTrack;
+    if (current != null && _playerService.openedPath != current.path) {
+      await _playTrackAtIndex(state.currentIndex, startPosition: state.position);
+      return;
+    }
+
+    state = state.copyWith(isPlaying: true);
     await _playerService.play();
     _updateNotification();
   }
 
   Future<void> pause() async {
+    if (state.isLoading) return;
+    state = state.copyWith(isPlaying: false);
     await _playerService.pause();
     _updateNotification();
     _saveQueue();
   }
 
   Future<void> stop() async {
+    _activeOperationId++;
     await _playerService.stop();
     _playerService.stopNotification();
-    state = state.copyWith(isPlaying: false, position: Duration.zero);
+    state = state.copyWith(
+      isPlaying: false,
+      isLoading: false,
+      position: Duration.zero,
+    );
     _saveQueue();
   }
 
   Future<void> togglePlayPause() async {
+    if (state.isLoading) return;
     if (state.isPlaying) {
       await pause();
     } else {
@@ -420,6 +488,7 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
   // --- Queue Actions ---
 
   Future<void> playNow(AudioTrackItem track, {String? playlistId}) async {
+    _consecutiveFailures = 0;
     final newItem = QueueItem(queueId: _generateQueueId(), track: track);
     final newQueue = List<QueueItem>.from(state.queue);
 
@@ -448,6 +517,7 @@ class AudioPlayerNotifier extends StateNotifier<AudioQueueState> {
     String? playlistId,
   }) async {
     if (tracks.isEmpty) return;
+    _consecutiveFailures = 0;
 
     final newQueue = tracks
         .map((t) => QueueItem(queueId: _generateQueueId(), track: t))

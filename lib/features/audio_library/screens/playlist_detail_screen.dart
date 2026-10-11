@@ -286,7 +286,7 @@ class PlaylistDetailScreen extends ConsumerWidget {
                   )
                 : ReorderableListView.builder(
                     itemCount: tracks.length,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 160),
                     // ignore: deprecated_member_use
                     onReorder: (oldIndex, newIndex) {
                       ref
@@ -457,11 +457,16 @@ class PlaylistDetailScreen extends ConsumerWidget {
                               ],
                             ),
                             onTap: () {
-                              ref.read(audioPlayerProvider.notifier).playTrackList(
-                                    tracks,
-                                    initialIndex: index,
-                                    playlistId: playlist.id,
-                                  );
+                              final current = ref.read(audioPlayerProvider).currentTrack;
+                              if (current?.id == track.id) {
+                                ref.read(audioPlayerProvider.notifier).togglePlayPause();
+                              } else {
+                                ref.read(audioPlayerProvider.notifier).playTrackList(
+                                      tracks,
+                                      initialIndex: index,
+                                      playlistId: playlist.id,
+                                    );
+                              }
                             },
                           ),
                         ),

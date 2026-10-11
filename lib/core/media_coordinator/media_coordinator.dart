@@ -28,9 +28,11 @@ class MediaCoordinator {
     _pauseAudioCallback = pauseAudio;
   }
 
-  /// Unregisters the active audio player's pause callback.
-  void unregisterAudioSession() {
-    _pauseAudioCallback = null;
+  /// Unregisters the active audio player's pause callback. Only clears if matching.
+  void unregisterAudioSession({VoidCallback? pauseAudio}) {
+    if (pauseAudio == null || _pauseAudioCallback == pauseAudio) {
+      _pauseAudioCallback = null;
+    }
   }
 
   /// Called synchronously before starting audio playback.

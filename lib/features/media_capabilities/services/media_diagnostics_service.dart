@@ -187,6 +187,28 @@ class MediaDiagnosticsService {
   PlaybackErrorKind _classifyErrorMessage(String msg) {
     final lower = msg.toLowerCase();
 
+    // Permission errors
+    if (lower.contains('permission denied') ||
+        lower.contains('access denied') ||
+        lower.contains('operation not permitted')) {
+      return PlaybackErrorKind.permissionDenied;
+    }
+
+    // Missing file errors
+    if (lower.contains('no such file') ||
+        lower.contains('does not exist') ||
+        lower.contains('filenotfound') ||
+        lower.contains('cannot open file')) {
+      return PlaybackErrorKind.fileNotFound;
+    }
+
+    // Empty file errors
+    if (lower.contains('empty file') ||
+        lower.contains('zero byte') ||
+        lower.contains('0 bytes')) {
+      return PlaybackErrorKind.emptyFile;
+    }
+
     // Corruption / truncation patterns
     if (lower.contains('corrupt') ||
         lower.contains('invalid data') ||
@@ -207,8 +229,7 @@ class MediaDiagnosticsService {
     }
 
     // Container / demux errors
-    if (lower.contains('no such file') ||
-        lower.contains('demux') ||
+    if (lower.contains('demux') ||
         lower.contains('container') ||
         lower.contains('format not supported') ||
         lower.contains('unknown format') ||

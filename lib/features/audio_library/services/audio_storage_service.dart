@@ -27,6 +27,18 @@ class AudioStorageService {
     return dir;
   }
 
+  Future<void> _atomicWriteJson(File dest, Object data) async {
+    final tempFile = File('${dest.path}.tmp');
+    final jsonStr = jsonEncode(data);
+    await tempFile.writeAsString(jsonStr, flush: true);
+    if (await dest.exists()) {
+      try {
+        await dest.delete();
+      } catch (_) {}
+    }
+    await tempFile.rename(dest.path);
+  }
+
   // --- Queue State Persistence ---
 
   Future<void> saveQueueState({
@@ -46,7 +58,7 @@ class AudioStorageService {
         'positionMs': position.inMilliseconds,
         'queue': queue.map((item) => item.toMap()).toList(),
       };
-      await file.writeAsString(jsonEncode(data), flush: true);
+      await _atomicWriteJson(file, data);
     } catch (_) {}
   }
 
@@ -114,7 +126,7 @@ class AudioStorageService {
       final dir = await _getAudioDir();
       final file = File('${dir.path}/recently_played.json');
       final list = tracks.take(50).map((t) => t.toMap()).toList();
-      await file.writeAsString(jsonEncode(list), flush: true);
+      await _atomicWriteJson(file, list);
     } catch (_) {}
   }
 
@@ -145,7 +157,7 @@ class AudioStorageService {
     try {
       final dir = await _getAudioDir();
       final file = File('${dir.path}/audio_settings.json');
-      await file.writeAsString(jsonEncode(settings.toMap()), flush: true);
+      await _atomicWriteJson(file, settings.toMap());
     } catch (_) {}
   }
 
@@ -170,7 +182,7 @@ class AudioStorageService {
       final dir = await _getAudioDir();
       final file = File('${dir.path}/playlists.json');
       final list = playlists.map((p) => p.toMap()).toList();
-      await file.writeAsString(jsonEncode(list), flush: true);
+      await _atomicWriteJson(file, list);
     } catch (_) {}
   }
 
@@ -201,7 +213,7 @@ class AudioStorageService {
     try {
       final dir = await _getAudioDir();
       final file = File('${dir.path}/pinned_folders.json');
-      await file.writeAsString(jsonEncode(paths), flush: true);
+      await _atomicWriteJson(file, paths);
     } catch (_) {}
   }
 

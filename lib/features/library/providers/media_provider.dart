@@ -235,8 +235,10 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
     }
   }
 
+  bool _isRefreshing = false;
+
   Future<void> loadNextPage() async {
-    if (state.isLoading || !state.hasMore) return;
+    if (state.isLoading || !state.hasMore || _isRefreshing) return;
     state = state.copyWith(isLoading: true);
     try {
       final newVideos = await _repository.getVideos(
@@ -244,7 +246,15 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
         offset: state.offset,
         folderName: _folderName,
       );
-      final mergedVideos = [...state.videos, ...newVideos];
+
+      final uniqueVideos = <String, VideoItem>{};
+      for (final v in state.videos) {
+        uniqueVideos[v.id] = v;
+      }
+      for (final v in newVideos) {
+        uniqueVideos[v.id] = v;
+      }
+      final mergedVideos = uniqueVideos.values.toList();
       
       if (_folderName != null) {
         mergedVideos.sort((a, b) => _naturalCompare(a.title, b.title));
@@ -290,8 +300,34 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
   }
 
   Future<void> refresh() async {
-    state = PaginatedVideoState(videos: [], isLoading: false, hasMore: true, offset: 0);
-    await loadNextPage();
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final newVideos = await _repository.getVideos(
+        limit: _limit,
+        offset: 0,
+        folderName: _folderName,
+      );
+      final uniqueVideos = <String, VideoItem>{};
+      for (final v in newVideos) {
+        uniqueVideos[v.id] = v;
+      }
+      final resultVideos = uniqueVideos.values.toList();
+      if (_folderName != null) {
+        resultVideos.sort((a, b) => _naturalCompare(a.title, b.title));
+      }
+      state = PaginatedVideoState(
+        videos: resultVideos,
+        isLoading: false,
+        hasMore: newVideos.length == _limit,
+        offset: newVideos.length,
+      );
+    } catch (e) {
+      // Retain last known valid videos if refresh encounters an error
+      state = state.copyWith(isLoading: false, error: e.toString());
+    } finally {
+      _isRefreshing = false;
+    }
   }
 }
 

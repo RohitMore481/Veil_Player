@@ -52,6 +52,14 @@ final audioFoldersProvider = FutureProvider<List<AudioFolderItem>>((ref) async {
     ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 });
 
+/// Live total discovered audio tracks count across all device folders.
+final totalAudioTracksCountProvider = Provider<int>((ref) {
+  final folders = ref.watch(audioFoldersProvider).valueOrNull ?? [];
+  final sumFromFolders = folders.fold<int>(0, (sum, f) => sum + f.trackCount);
+  final loadedTracksCount = ref.watch(allAudioTracksProvider).tracks.length;
+  return sumFromFolders > loadedTracksCount ? sumFromFolders : loadedTracksCount;
+});
+
 // Paginated Audio State
 class PaginatedAudioState {
   final List<AudioTrackItem> tracks;
@@ -125,6 +133,8 @@ class PaginatedAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   final AudioMediaRepository _repository;
   static const _limit = 50;
 
+  bool _isRefreshing = false;
+
   PaginatedAudioTracksNotifier(this._repository, {required bool hasPermission})
       : super(PaginatedAudioState(tracks: [], isLoading: false, hasMore: hasPermission, offset: 0)) {
     if (hasPermission) {
@@ -133,14 +143,22 @@ class PaginatedAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   }
 
   Future<void> loadNextPage() async {
-    if (state.isLoading || !state.hasMore) return;
+    if (state.isLoading || !state.hasMore || _isRefreshing) return;
     state = state.copyWith(isLoading: true);
     try {
       final newTracks = await _repository.getAudioTracks(
         limit: _limit,
         offset: state.offset,
       );
-      final mergedTracks = [...state.tracks, ...newTracks];
+
+      final uniqueTracks = <String, AudioTrackItem>{};
+      for (final t in state.tracks) {
+        uniqueTracks[t.id] = t;
+      }
+      for (final t in newTracks) {
+        uniqueTracks[t.id] = t;
+      }
+      final mergedTracks = uniqueTracks.values.toList();
 
       state = state.copyWith(
         tracks: mergedTracks,
@@ -154,8 +172,28 @@ class PaginatedAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   }
 
   Future<void> refresh() async {
-    state = PaginatedAudioState(tracks: [], isLoading: false, hasMore: true, offset: 0);
-    await loadNextPage();
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final newTracks = await _repository.getAudioTracks(
+        limit: _limit,
+        offset: 0,
+      );
+      final uniqueTracks = <String, AudioTrackItem>{};
+      for (final t in newTracks) {
+        uniqueTracks[t.id] = t;
+      }
+      state = PaginatedAudioState(
+        tracks: uniqueTracks.values.toList(),
+        isLoading: false,
+        hasMore: newTracks.length == _limit,
+        offset: newTracks.length,
+      );
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    } finally {
+      _isRefreshing = false;
+    }
   }
 }
 
@@ -173,6 +211,7 @@ class FolderAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   final AudioMediaRepository _repository;
   final String? _folderPath;
   static const _limit = 50;
+  bool _isRefreshing = false;
 
   FolderAudioTracksNotifier(this._repository, this._folderPath, {required bool hasPermission})
       : super(PaginatedAudioState(tracks: [], isLoading: false, hasMore: hasPermission, offset: 0)) {
@@ -182,7 +221,7 @@ class FolderAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   }
 
   Future<void> loadNextPage() async {
-    if (state.isLoading || !state.hasMore) return;
+    if (state.isLoading || !state.hasMore || _isRefreshing) return;
     state = state.copyWith(isLoading: true);
     try {
       final newTracks = await _repository.getAudioTracks(
@@ -190,7 +229,15 @@ class FolderAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
         offset: state.offset,
         folderPath: _folderPath,
       );
-      final mergedTracks = [...state.tracks, ...newTracks];
+
+      final uniqueTracks = <String, AudioTrackItem>{};
+      for (final t in state.tracks) {
+        uniqueTracks[t.id] = t;
+      }
+      for (final t in newTracks) {
+        uniqueTracks[t.id] = t;
+      }
+      final mergedTracks = uniqueTracks.values.toList();
 
       // Folder scoped tracks preserve album/track order or natural title sorting
       mergedTracks.sort(compareAudioTracks);
@@ -207,8 +254,30 @@ class FolderAudioTracksNotifier extends StateNotifier<PaginatedAudioState> {
   }
 
   Future<void> refresh() async {
-    state = PaginatedAudioState(tracks: [], isLoading: false, hasMore: true, offset: 0);
-    await loadNextPage();
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    try {
+      final newTracks = await _repository.getAudioTracks(
+        limit: _limit,
+        offset: 0,
+        folderPath: _folderPath,
+      );
+      final uniqueTracks = <String, AudioTrackItem>{};
+      for (final t in newTracks) {
+        uniqueTracks[t.id] = t;
+      }
+      final list = uniqueTracks.values.toList()..sort(compareAudioTracks);
+      state = PaginatedAudioState(
+        tracks: list,
+        isLoading: false,
+        hasMore: newTracks.length == _limit,
+        offset: newTracks.length,
+      );
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: e.toString());
+    } finally {
+      _isRefreshing = false;
+    }
   }
 }
 

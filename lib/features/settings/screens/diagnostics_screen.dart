@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -83,90 +82,6 @@ class DiagnosticsScreen extends ConsumerWidget {
               ],
             ),
           ),
-
-          // Temporary DEBUG-only Test Trigger
-          if (kDebugMode) ...[
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E1700) : const Color(0xFFFFFBEB),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.amber.withValues(alpha: isDark ? 0.4 : 0.6),
-                  width: 1.2,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.amber,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'DEBUG ONLY',
-                          style: TextStyle(
-                            color: Colors.black,
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Diagnostics Pipeline Test',
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Creates a synthetic playback anomaly report with private-looking test paths to verify privacy sanitization, local storage, and Android sharing.',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-                      fontSize: 11,
-                      height: 1.3,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 42,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _generateTestReport(context, ref),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber.shade700,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      icon: const Icon(Icons.science_outlined, size: 18),
-                      label: const Text(
-                        'Generate Test Diagnostic Report',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
 
           // Manual Create Report Button
           Padding(
@@ -407,33 +322,6 @@ class DiagnosticsScreen extends ConsumerWidget {
     ref.invalidate(diagnosticReportsProvider);
 
     if (report != null && context.mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (ctx) => ReportViewerScreen(report: report),
-        ),
-      );
-    }
-  }
-
-  Future<void> _generateTestReport(BuildContext context, WidgetRef ref) async {
-    final service = ref.read(diagnosticServiceProvider);
-    final report = await service.createTestDiagnosticReport();
-    ref.invalidate(diagnosticReportsProvider);
-
-    if (report != null && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle_outline, color: Colors.greenAccent),
-              SizedBox(width: 8),
-              Text('Test diagnostic report generated successfully'),
-            ],
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
       Navigator.push(
         context,
         MaterialPageRoute(

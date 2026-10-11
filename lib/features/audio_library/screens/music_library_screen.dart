@@ -20,6 +20,7 @@ import '../widgets/manage_audio_pinned_folders_dialog.dart';
 import 'all_audio_tracks_screen.dart';
 import 'audio_folder_detail_screen.dart';
 import 'music_search_screen.dart';
+import 'now_playing_screen.dart';
 import 'playlist_detail_screen.dart';
 
 class MusicLibraryScreen extends ConsumerStatefulWidget {
@@ -90,6 +91,7 @@ class _MusicLibraryScreenState extends ConsumerState<MusicLibraryScreen>
     final playlists = ref.watch(playlistsProvider);
     final queueState = ref.watch(audioPlayerProvider);
     final isStorageManager = ref.watch(storageManagerProvider);
+    final totalAudioTracks = ref.watch(totalAudioTracksCountProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -258,15 +260,29 @@ class _MusicLibraryScreenState extends ConsumerState<MusicLibraryScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        recentTracks.isNotEmpty
-                            ? 'Continue Listening'
-                            : 'Music Library',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.onSurface
-                              .withValues(alpha: 0.7),
-                        ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            recentTracks.isNotEmpty
+                                ? 'Continue Listening'
+                                : 'Music Library',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.7),
+                            ),
+                          ),
+                          if (totalAudioTracks > 0)
+                            Text(
+                              '$totalAudioTracks tracks',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.45),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 10),
                       if (recentTracks.isNotEmpty)
@@ -320,7 +336,9 @@ class _MusicLibraryScreenState extends ConsumerState<MusicLibraryScreen>
                                 ),
                                 const SizedBox(height: 12),
                                 VeilButton(
-                                  label: 'Browse Songs',
+                                  label: totalAudioTracks > 0
+                                      ? 'Browse All ($totalAudioTracks)'
+                                      : 'Browse Songs',
                                   icon: Icons.queue_music_rounded,
                                   height: 32,
                                   onTap: () {
@@ -591,7 +609,7 @@ class _MusicLibraryScreenState extends ConsumerState<MusicLibraryScreen>
 
               // Bottom clearance spacing (MiniPlayer + Nav bar safe zone)
               const SliverToBoxAdapter(
-                child: SizedBox(height: 120),
+                child: SizedBox(height: 160),
               ),
             ],
           ),
@@ -646,9 +664,12 @@ class _AudioHeroContinueCardState
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
-    final currentPlaying = ref.watch(audioPlayerProvider).currentTrack;
+    final queueState = ref.watch(audioPlayerProvider);
+    final currentPlaying = queueState.currentTrack;
     final isPlaying =
-        currentPlaying?.id == widget.track.id && ref.watch(audioPlayerProvider).isPlaying;
+        currentPlaying?.id == widget.track.id && queueState.isPlaying;
+    final isLoading =
+        currentPlaying?.id == widget.track.id && queueState.isLoading;
 
     return GestureDetector(
       onTapDown: (_) {
@@ -658,9 +679,13 @@ class _AudioHeroContinueCardState
       onTapUp: (_) {
         _animController.reverse();
         setState(() => _isHighlighted = false);
-        ref
-            .read(audioPlayerProvider.notifier)
-            .playTrackList(widget.trackList, initialIndex: 0);
+        // Tapping the card opens the Now Playing screen
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (ctx) => const NowPlayingScreen(),
+        );
       },
       onTapCancel: () {
         _animController.reverse();
@@ -739,17 +764,25 @@ class _AudioHeroContinueCardState
                     const SizedBox(width: 12),
                     VeilButton(
                       height: 36,
-                      label: isPlaying ? 'Pause' : 'Play',
+                      label: isLoading
+                          ? 'Loading'
+                          : (isPlaying ? 'Pause' : 'Play'),
                       icon: isPlaying
                           ? Icons.pause_rounded
                           : Icons.play_arrow_rounded,
+                      isDisabled: isLoading,
                       onTap: () {
+                        if (isLoading) return;
                         if (isPlaying) {
                           ref.read(audioPlayerProvider.notifier).pause();
                         } else {
-                          ref
-                              .read(audioPlayerProvider.notifier)
-                              .playTrackList(widget.trackList, initialIndex: 0);
+                          if (currentPlaying?.id == widget.track.id) {
+                            ref.read(audioPlayerProvider.notifier).play();
+                          } else {
+                            ref
+                                .read(audioPlayerProvider.notifier)
+                                .playTrackList(widget.trackList, initialIndex: 0);
+                          }
                         }
                       },
                     ),

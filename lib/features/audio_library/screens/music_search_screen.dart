@@ -71,22 +71,38 @@ class _MusicSearchScreenState extends ConsumerState<MusicSearchScreen> {
               color: isDark ? Colors.white : Colors.black87),
           onPressed: () => Navigator.pop(context),
         ),
-        title: TextField(
-          controller: _searchController,
-          focusNode: _focusNode,
-          autofocus: true,
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
-            fontSize: 16,
-          ),
-          decoration: InputDecoration(
-            hintText: 'Search songs, artists, albums...',
-            hintStyle: TextStyle(
-              color: isDark ? Colors.white38 : Colors.black38,
-              fontSize: 15,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _searchController,
+              focusNode: _focusNode,
+              autofocus: true,
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 16,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Search songs, artists, albums...',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.black38,
+                  fontSize: 15,
+                ),
+                border: InputBorder.none,
+                isDense: true,
+              ),
             ),
-            border: InputBorder.none,
-          ),
+            if (_searchController.text.isNotEmpty)
+              Text(
+                '${_filteredTracks.length} ${_filteredTracks.length == 1 ? 'track' : 'tracks'} found',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+          ],
         ),
         actions: [
           if (_searchController.text.isNotEmpty)
@@ -131,7 +147,7 @@ class _MusicSearchScreenState extends ConsumerState<MusicSearchScreen> {
             )
           : ListView.builder(
               itemCount: _filteredTracks.length,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
               itemBuilder: (context, index) {
                 final track = _filteredTracks[index];
                 final currentPlaying =

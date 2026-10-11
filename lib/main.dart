@@ -8,7 +8,6 @@ import 'features/main/screens/splash_wrapper.dart';
 import 'features/player/providers/player_settings_provider.dart';
 import 'core/utils/crash_handler.dart';
 import 'core/utils/method_channel_dispatcher.dart';
-
 import 'diagnostics/diagnostic_service.dart';
 
 void main() async {

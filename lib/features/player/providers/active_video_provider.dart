@@ -5,3 +5,7 @@ import '../../library/models/video_item.dart';
 ///
 /// If null, no active media is currently playing.
 final activeVideoProvider = StateProvider<VideoItem?>((ref) => null);
+
+/// Tracks the unique session identifier of the active PlayerScreen to prevent
+/// cleanup operations from previous sessions from stomping on a newly opened session.
+final activeVideoSessionIdProvider = StateProvider<String?>((ref) => null);

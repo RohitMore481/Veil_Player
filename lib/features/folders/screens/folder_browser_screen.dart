@@ -605,9 +605,9 @@ class _FolderBrowserScreenState extends ConsumerState<FolderBrowserScreen> with 
             ),
           ),
 
-        // Bottom clearance spacing to clear the floating tab pill bar
+        // Bottom clearance spacing to clear the floating tab pill bar & mini-player
         const SliverToBoxAdapter(
-          child: SizedBox(height: 100),
+          child: SizedBox(height: 160),
         ),
       ],
     );

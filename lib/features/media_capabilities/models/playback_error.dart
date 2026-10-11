@@ -21,6 +21,15 @@ enum PlaybackErrorKind {
   /// A network resource could not be reached.
   networkError,
 
+  /// The local file was deleted, moved, or cannot be found.
+  fileNotFound,
+
+  /// The local file is 0 bytes or completely empty.
+  emptyFile,
+
+  /// Storage or file permission was denied by the OS.
+  permissionDenied,
+
   /// The error could not be specifically classified.
   unknown,
 }
@@ -66,6 +75,12 @@ class PlaybackError {
         return 'Container Error';
       case PlaybackErrorKind.networkError:
         return 'Network Error';
+      case PlaybackErrorKind.fileNotFound:
+        return 'File Not Found';
+      case PlaybackErrorKind.emptyFile:
+        return 'Empty File';
+      case PlaybackErrorKind.permissionDenied:
+        return 'Permission Denied';
       case PlaybackErrorKind.unknown:
         return 'Playback Error';
     }
@@ -97,6 +112,12 @@ class PlaybackError {
         return 'An error occurred while reading the file container. The file may be damaged.';
       case PlaybackErrorKind.networkError:
         return 'Could not reach the network resource. Check your connection and try again.';
+      case PlaybackErrorKind.fileNotFound:
+        return 'The media file could not be found or has been moved or deleted.';
+      case PlaybackErrorKind.emptyFile:
+        return 'The media file contains 0 bytes and cannot be played.';
+      case PlaybackErrorKind.permissionDenied:
+        return 'Veil Player does not have permission to read this media file.';
       case PlaybackErrorKind.unknown:
         return rawMessage != null
             ? 'Playback failed: $rawMessage'
@@ -119,6 +140,12 @@ class PlaybackError {
         return 'Try re-downloading the file or converting it to MKV/MP4.';
       case PlaybackErrorKind.networkError:
         return 'Check your network connection and try again.';
+      case PlaybackErrorKind.fileNotFound:
+        return 'Check if the file still exists on your storage or rescan library.';
+      case PlaybackErrorKind.emptyFile:
+        return 'Check if the file download or transfer completed properly.';
+      case PlaybackErrorKind.permissionDenied:
+        return 'Grant storage or media permissions in device settings.';
       case PlaybackErrorKind.unknown:
         return 'Try a different file or check the file integrity.';
     }

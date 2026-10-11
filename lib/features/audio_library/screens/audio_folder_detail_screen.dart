@@ -9,6 +9,8 @@ import '../models/audio_folder_item.dart';
 import '../providers/audio_library_providers.dart';
 import '../providers/audio_pinned_folders_provider.dart';
 import '../providers/audio_player_provider.dart';
+import '../screens/now_playing_screen.dart';
+import '../widgets/audio_queue_sheet.dart';
 import '../widgets/audio_track_overflow_sheet.dart';
 
 class AudioFolderDetailScreen extends ConsumerStatefulWidget {
@@ -61,10 +63,15 @@ class _AudioFolderDetailScreenState
     final tracks = paginated.tracks;
     final isPinned =
         ref.watch(audioPinnedFoldersProvider).contains(widget.folder.path);
-    final currentPlaying = ref.watch(audioPlayerProvider).currentTrack;
-    final recentTracks = ref.watch(recentlyPlayedAudioProvider);
-    final lastPlayedTrack =
-        recentTracks.isNotEmpty ? recentTracks.first : null;
+    final playerState = ref.watch(audioPlayerProvider);
+    final currentPlaying = playerState.currentTrack;
+    final isPlaying = playerState.isPlaying;
+
+    final progress = (playerState.duration.inMilliseconds > 0)
+        ? (playerState.position.inMilliseconds /
+                playerState.duration.inMilliseconds)
+            .clamp(0.0, 1.0)
+        : 0.0;
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : theme.scaffoldBackgroundColor,
@@ -101,7 +108,7 @@ class _AudioFolderDetailScreenState
                             color: Colors.black26, size: 16),
                         Expanded(
                           child: Text(
-                            widget.folder.name,
+                            '${widget.folder.name} (${widget.folder.formattedTrackCount})',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
@@ -148,6 +155,199 @@ class _AudioFolderDetailScreenState
                   : const Color(0xFFE5E7EB),
               height: 1,
             ),
+
+            // Compact Now Playing Bar (Global session control across folders)
+            if (currentPlaying != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      PageRouteBuilder(
+                        pageBuilder: (context, anim, secAnim) =>
+                            const NowPlayingScreen(),
+                        transitionsBuilder: (context, anim, secAnim, child) {
+                          const begin = Offset(0.0, 1.0);
+                          const end = Offset.zero;
+                          final curve = CurvedAnimation(
+                              parent: anim, curve: Curves.easeOutCubic);
+                          return SlideTransition(
+                            position: Tween<Offset>(begin: begin, end: end)
+                                .animate(curve),
+                            child: child,
+                          );
+                        },
+                      ),
+                    );
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF111417)
+                          : const Color(0xFFF3F4F6),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: primary.withValues(alpha: 0.35),
+                        width: 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black
+                              .withValues(alpha: isDark ? 0.35 : 0.06),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Real-time playback progress line
+                        LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: Colors.transparent,
+                          valueColor: AlwaysStoppedAnimation<Color>(primary),
+                          minHeight: 2.5,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 8),
+                          child: Row(
+                            children: [
+                              // Artwork / Animated Equalizer icon
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: primary.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: primary.withValues(alpha: 0.3),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Icon(
+                                  isPlaying
+                                      ? Icons.graphic_eq_rounded
+                                      : Icons.music_note_rounded,
+                                  color: primary,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              // Track info
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      currentPlaying.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${currentPlaying.artist}  •  ${isPlaying ? "Playing" : "Paused"}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black54,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Queue button
+                              IconButton(
+                                icon: Icon(
+                                  Icons.queue_music_rounded,
+                                  color:
+                                      isDark ? Colors.white70 : Colors.black54,
+                                  size: 20,
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
+                                tooltip: 'Queue',
+                                onPressed: () {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (ctx) =>
+                                        const AudioQueueSheet(),
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 4),
+                              // Working Play/Pause button
+                              IconButton(
+                                icon: playerState.isLoading
+                                    ? SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: primary,
+                                        ),
+                                      )
+                                    : Icon(
+                                        isPlaying
+                                            ? Icons.pause_circle_filled_rounded
+                                            : Icons.play_circle_fill_rounded,
+                                        color: primary,
+                                        size: 32,
+                                      ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 36, minHeight: 36),
+                                tooltip: isPlaying ? 'Pause' : 'Play',
+                                onPressed: playerState.isLoading
+                                    ? null
+                                    : () {
+                                        ref
+                                            .read(audioPlayerProvider.notifier)
+                                            .togglePlayPause();
+                                      },
+                              ),
+                              const SizedBox(width: 2),
+                              // Next track button
+                              IconButton(
+                                icon: Icon(
+                                  Icons.skip_next_rounded,
+                                  color:
+                                      isDark ? Colors.white70 : Colors.black54,
+                                  size: 24,
+                                ),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                    minWidth: 32, minHeight: 32),
+                                tooltip: 'Next Track',
+                                onPressed: () {
+                                  ref.read(audioPlayerProvider.notifier).next();
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
 
             // Play All / Shuffle All Header
             if (tracks.isNotEmpty)
@@ -233,7 +433,7 @@ class _AudioFolderDetailScreenState
                           itemCount: tracks.length +
                               (paginated.hasMore ? 1 : 0),
                           padding:
-                              const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                              const EdgeInsets.fromLTRB(16, 4, 16, 160),
                           itemBuilder: (context, index) {
                             if (index == tracks.length) {
                               return Center(
@@ -248,25 +448,26 @@ class _AudioFolderDetailScreenState
                             final track = tracks[index];
                             final isCurrent =
                                 currentPlaying?.id == track.id;
-                            final isLastPlayed = !isCurrent &&
-                                lastPlayedTrack != null &&
-                                lastPlayedTrack.id == track.id;
 
                             return Dismissible(
-                              key: ValueKey('swipe_queue_folder_${track.id}_$index'),
+                              key: ValueKey(
+                                  'swipe_queue_folder_${track.id}_$index'),
                               direction: DismissDirection.startToEnd,
                               confirmDismiss: (direction) async {
                                 HapticFeedback.mediumImpact();
                                 ref
                                     .read(audioPlayerProvider.notifier)
                                     .addTrack(track);
-                                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                ScaffoldMessenger.of(context)
+                                    .hideCurrentSnackBar();
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Row(
                                       children: [
-                                        const Icon(Icons.queue_music_rounded,
-                                            color: Colors.white, size: 18),
+                                        const Icon(
+                                            Icons.queue_music_rounded,
+                                            color: Colors.white,
+                                            size: 18),
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: Text(
@@ -277,7 +478,8 @@ class _AudioFolderDetailScreenState
                                         ),
                                       ],
                                     ),
-                                    backgroundColor: const Color(0xFF10B981),
+                                    backgroundColor:
+                                        const Color(0xFF10B981),
                                     behavior: SnackBarBehavior.floating,
                                     duration: const Duration(seconds: 2),
                                   ),
@@ -286,9 +488,10 @@ class _AudioFolderDetailScreenState
                               },
                               background: Container(
                                 alignment: Alignment.centerLeft,
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 16),
-                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16),
+                                margin:
+                                    const EdgeInsets.symmetric(vertical: 2),
                                 decoration: BoxDecoration(
                                   color: primary,
                                   borderRadius: BorderRadius.circular(10),
@@ -310,32 +513,24 @@ class _AudioFolderDetailScreenState
                                 ),
                               ),
                               child: Container(
-                                margin: const EdgeInsets.symmetric(vertical: 2),
+                                margin:
+                                    const EdgeInsets.symmetric(vertical: 2),
                                 decoration: BoxDecoration(
                                   color: isCurrent
-                                      ? primary.withValues(alpha: 0.08)
-                                      : isLastPlayed
-                                          ? (isDark
-                                              ? const Color(0xFF0F0F0F)
-                                              : const Color(0xFFF3F4F6))
-                                          : Colors.transparent,
+                                      ? primary.withValues(alpha: 0.10)
+                                      : Colors.transparent,
                                   borderRadius: BorderRadius.circular(10),
                                   border: isCurrent
                                       ? Border.all(
                                           color: primary
-                                              .withValues(alpha: 0.4),
+                                              .withValues(alpha: 0.45),
                                           width: 1)
-                                      : isLastPlayed
-                                          ? Border.all(
-                                              color: isDark
-                                                  ? const Color(0xFF1E1E1E)
-                                                  : const Color(0xFFE5E7EB),
-                                              width: 1)
-                                          : null,
+                                      : null,
                                 ),
                                 child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 2),
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 2),
                                   leading: Container(
                                     width: 40,
                                     height: 40,
@@ -347,11 +542,14 @@ class _AudioFolderDetailScreenState
                                                   .withValues(alpha: 0.06)
                                               : Colors.black
                                                   .withValues(alpha: 0.04)),
-                                      borderRadius: BorderRadius.circular(10),
+                                      borderRadius:
+                                          BorderRadius.circular(10),
                                     ),
                                     child: Icon(
                                       isCurrent
-                                          ? Icons.graphic_eq_rounded
+                                          ? (isPlaying
+                                              ? Icons.graphic_eq_rounded
+                                              : Icons.play_arrow_rounded)
                                           : Icons.music_note_rounded,
                                       color: isCurrent
                                           ? primary
@@ -361,53 +559,21 @@ class _AudioFolderDetailScreenState
                                       size: 20,
                                     ),
                                   ),
-                                  title: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          track.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: isCurrent
-                                                ? FontWeight.bold
-                                                : FontWeight.w500,
-                                            color: isCurrent
-                                                ? primary
-                                                : (isDark
-                                                    ? Colors.white
-                                                    : Colors.black87),
-                                          ),
-                                        ),
-                                      ),
-                                      if (isLastPlayed) ...[
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 5, vertical: 1.5),
-                                          decoration: BoxDecoration(
-                                            color:
-                                                primary.withValues(alpha: 0.12),
-                                            borderRadius:
-                                                BorderRadius.circular(4),
-                                            border: Border.all(
-                                                color: primary
-                                                    .withValues(alpha: 0.35),
-                                                width: 0.8),
-                                          ),
-                                          child: Text(
-                                            'LAST PLAYED',
-                                            style: TextStyle(
-                                              fontSize: 8.5,
-                                              fontWeight: FontWeight.bold,
-                                              color: primary,
-                                              letterSpacing: 0.2,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ],
+                                  title: Text(
+                                    track.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: isCurrent
+                                          ? FontWeight.bold
+                                          : FontWeight.w500,
+                                      color: isCurrent
+                                          ? primary
+                                          : (isDark
+                                              ? Colors.white
+                                              : Colors.black87),
+                                    ),
                                   ),
                                   subtitle: Text(
                                     '${track.artist}  •  ${track.formattedDuration}',
@@ -431,7 +597,8 @@ class _AudioFolderDetailScreenState
                                     onPressed: () {
                                       showModalBottomSheet(
                                         context: context,
-                                        backgroundColor: Colors.transparent,
+                                        backgroundColor:
+                                            Colors.transparent,
                                         builder: (ctx) =>
                                             AudioTrackOverflowSheet(
                                                 track: track),
@@ -439,10 +606,19 @@ class _AudioFolderDetailScreenState
                                     },
                                   ),
                                   onTap: () {
-                                    ref
-                                        .read(audioPlayerProvider.notifier)
-                                        .playTrackList(tracks,
-                                            initialIndex: index);
+                                    final current = ref
+                                        .read(audioPlayerProvider)
+                                        .currentTrack;
+                                    if (current?.id == track.id) {
+                                      ref
+                                          .read(audioPlayerProvider.notifier)
+                                          .togglePlayPause();
+                                    } else {
+                                      ref
+                                          .read(audioPlayerProvider.notifier)
+                                          .playTrackList(tracks,
+                                              initialIndex: index);
+                                    }
                                   },
                                 ),
                               ),

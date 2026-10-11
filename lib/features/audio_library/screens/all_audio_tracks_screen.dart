@@ -94,9 +94,8 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
 
     final paginated = ref.watch(allAudioTracksProvider);
     final currentPlaying = ref.watch(audioPlayerProvider).currentTrack;
-    final recentTracks = ref.watch(recentlyPlayedAudioProvider);
-    final lastPlayedTrack =
-        recentTracks.isNotEmpty ? recentTracks.first : null;
+    final totalTracks = ref.watch(totalAudioTracksCountProvider);
+    final count = totalTracks > 0 ? totalTracks : paginated.tracks.length;
 
     final displayedTracks = _applySort(paginated.tracks);
 
@@ -132,7 +131,7 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
                             color: Colors.black26, size: 16),
                         Expanded(
                           child: Text(
-                            'All Songs (${paginated.tracks.length})',
+                            'All Songs ($count)',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.titleMedium?.copyWith(
@@ -383,7 +382,7 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
                     : ListView.builder(
                         controller: _scrollController,
                         physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 120),
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 160),
                         itemCount: displayedTracks.length +
                             (paginated.hasMore ? 1 : 0),
                         itemBuilder: (context, index) {
@@ -399,9 +398,7 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
 
                           final track = displayedTracks[index];
                           final isCurrent = currentPlaying?.id == track.id;
-                          final isLastPlayed = !isCurrent &&
-                              lastPlayedTrack != null &&
-                              lastPlayedTrack.id == track.id;
+
                           final isSelected =
                               _selectedTrackIds.contains(track.id);
 
@@ -411,24 +408,14 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
                               color: isSelected
                                   ? primary.withValues(alpha: 0.16)
                                   : isCurrent
-                                      ? primary.withValues(alpha: 0.08)
-                                      : isLastPlayed
-                                          ? (isDark
-                                              ? const Color(0xFF0F0F0F)
-                                              : const Color(0xFFF3F4F6))
-                                          : Colors.transparent,
+                                      ? primary.withValues(alpha: 0.10)
+                                      : Colors.transparent,
                               borderRadius: BorderRadius.circular(10),
                               border: isCurrent
                                   ? Border.all(
-                                      color: primary.withValues(alpha: 0.4),
+                                      color: primary.withValues(alpha: 0.45),
                                       width: 1)
-                                  : isLastPlayed
-                                      ? Border.all(
-                                          color: isDark
-                                              ? const Color(0xFF1E1E1E)
-                                              : const Color(0xFFE5E7EB),
-                                          width: 1)
-                                      : null,
+                                  : null,
                             ),
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(
@@ -473,52 +460,21 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
                                         size: 20,
                                       ),
                                     ),
-                              title: Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      track.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: isCurrent
-                                            ? FontWeight.bold
-                                            : FontWeight.w500,
-                                        color: isCurrent
-                                            ? primary
-                                            : (isDark
-                                                ? Colors.white
-                                                : Colors.black87),
-                                      ),
-                                    ),
-                                  ),
-                                  if (isLastPlayed) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 5, vertical: 1.5),
-                                      decoration: BoxDecoration(
-                                        color: primary.withValues(alpha: 0.12),
-                                        borderRadius:
-                                            BorderRadius.circular(4),
-                                        border: Border.all(
-                                            color:
-                                                primary.withValues(alpha: 0.35),
-                                            width: 0.8),
-                                      ),
-                                      child: Text(
-                                        'LAST PLAYED',
-                                        style: TextStyle(
-                                          fontSize: 8.5,
-                                          fontWeight: FontWeight.bold,
-                                          color: primary,
-                                          letterSpacing: 0.2,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
+                              title: Text(
+                                track.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: isCurrent
+                                      ? FontWeight.bold
+                                      : FontWeight.w500,
+                                  color: isCurrent
+                                      ? primary
+                                      : (isDark
+                                          ? Colors.white
+                                          : Colors.black87),
+                                ),
                               ),
                               subtitle: Text(
                                 '${track.artist}  •  ${track.formattedDuration}',
@@ -570,12 +526,17 @@ class _AllAudioTracksScreenState extends ConsumerState<AllAudioTracksScreen> {
                                     }
                                   });
                                 } else {
-                                  ref
-                                      .read(audioPlayerProvider.notifier)
-                                      .playTrackList(
-                                        displayedTracks,
-                                        initialIndex: index,
-                                      );
+                                  final current = ref.read(audioPlayerProvider).currentTrack;
+                                  if (current?.id == track.id) {
+                                    ref.read(audioPlayerProvider.notifier).togglePlayPause();
+                                  } else {
+                                    ref
+                                        .read(audioPlayerProvider.notifier)
+                                        .playTrackList(
+                                          displayedTracks,
+                                          initialIndex: index,
+                                        );
+                                  }
                                 }
                               },
                             ),

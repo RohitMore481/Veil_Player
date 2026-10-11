@@ -109,6 +109,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   // Media Capabilities Layer state
   PlaybackError? _currentPlaybackError;
   bool _showPlaybackError = false;
+  Timer? _playbackErrorTimer;
 
   int lastSavedPositionMs = 0;
 
@@ -127,6 +128,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   bool _isFocusModeActive = false;
   bool _isCleanedUp = false;
   bool _canPop = false;
+  late final String _sessionIdentity;
+  late final VoidCallback _pauseVideoCallback;
 
   Future<void> _evaluateFocusMode() async {
     if (!mounted) return;
@@ -197,12 +200,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     hudNotificationTimer = null;
     sleepTimer?.cancel();
     sleepTimer = null;
+    _playbackErrorTimer?.cancel();
+    _playbackErrorTimer = null;
 
     // Guard global state cleanup so a newly opened video session is never disturbed
     try {
-      final currentActive = ref.read(activeVideoProvider);
-      final thisVideo = _currentVideo ?? widget.video;
-      if (currentActive == null || currentActive.id == thisVideo?.id || currentActive.path == thisVideo?.path) {
+      final activeSessionId = ref.read(activeVideoSessionIdProvider);
+      if (activeSessionId == null || activeSessionId == _sessionIdentity) {
         _updateActiveVideo(null);
         ref.read(currentDiagnosticsProvider.notifier).state = null;
         ref.read(currentPlaybackErrorProvider.notifier).state = null;
@@ -217,7 +221,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       }
     } catch (_) {}
 
-    MediaCoordinator.instance.unregisterVideoSession();
+    MediaCoordinator.instance.unregisterVideoSession(pauseVideo: _pauseVideoCallback);
 
     if (_isFocusModeActive) {
       _isFocusModeActive = false;
@@ -347,6 +351,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
   @override
   void initState() {
     super.initState();
+    _sessionIdentity = 'video_${DateTime.now().microsecondsSinceEpoch}';
+    _pauseVideoCallback = () {
+      try {
+        player.pause();
+      } catch (_) {}
+    };
     WidgetsBinding.instance.addObserver(this);
 
     _currentVideo = widget.video;
@@ -374,11 +384,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     );
 
     MediaCoordinator.instance.onVideoStarting();
-    MediaCoordinator.instance.registerVideoSession(pauseVideo: () {
-      try {
-        player.pause();
-      } catch (_) {}
-    });
+    MediaCoordinator.instance.registerVideoSession(pauseVideo: _pauseVideoCallback);
 
     _initPlayback();
     _initSettings();
@@ -502,31 +508,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     // ── Media Capabilities: error detection ───────────────────────────────────
     errorSub = player.stream.error.listen((errorMessage) {
       if (!mounted || errorMessage.isEmpty) return;
-      DiagnosticService.instance.recordEvent(
-        category: DiagnosticCategory.player,
-        severity: DiagnosticSeverity.error,
-        event: 'Playback error: $errorMessage',
-      );
-      unawaited(DiagnosticService.instance.createAnomalyReport(
-        category: 'PLAYER',
-        exceptionMessage: errorMessage,
-      ));
       final diagnosticsService = ref.read(mediaDiagnosticsServiceProvider);
       final error = diagnosticsService.classifyRawError(errorMessage);
-      setState(() {
-        _currentPlaybackError = error;
-        _showPlaybackError = true;
-      });
-      // Update the global error provider
-      ref.read(currentPlaybackErrorProvider.notifier).state = error;
-      // Auto-dismiss the error overlay after 8 seconds
-      Timer(const Duration(seconds: 8), () {
-        if (mounted) {
-          setState(() {
-            _showPlaybackError = false;
-          });
-        }
-      });
+      _handlePlaybackError(error);
     });
 
     // Initialize folder list navigation asynchronously after the first frame
@@ -539,6 +523,86 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     }
 
     startHideTimer();
+  }
+
+  void _handlePlaybackError(PlaybackError error) {
+    if (!mounted) return;
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.error,
+      event: 'Playback error: ${error.title} - ${error.rawMessage}',
+    );
+    unawaited(DiagnosticService.instance.createAnomalyReport(
+      category: 'PLAYER',
+      exceptionMessage: error.rawMessage ?? error.title,
+    ));
+    _playbackErrorTimer?.cancel();
+    setState(() {
+      _currentPlaybackError = error;
+      _showPlaybackError = true;
+    });
+    ref.read(currentPlaybackErrorProvider.notifier).state = error;
+    _playbackErrorTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) {
+        setState(() {
+          _showPlaybackError = false;
+        });
+      }
+    });
+  }
+
+  Future<bool> _openMediaWithFaultTolerance(String videoPath) async {
+    // 1. Pre-validation for local filesystem files
+    if (!videoPath.startsWith('http://') &&
+        !videoPath.startsWith('https://') &&
+        !videoPath.startsWith('asset://') &&
+        !videoPath.startsWith('content://')) {
+      final file = File(videoPath);
+      if (file.existsSync()) {
+        try {
+          final len = file.lengthSync();
+          if (len == 0) {
+            final error = PlaybackError(
+              kind: PlaybackErrorKind.emptyFile,
+              rawMessage: 'File is empty (0 bytes): $videoPath',
+              detectedAt: DateTime.now(),
+            );
+            _handlePlaybackError(error);
+            return false;
+          }
+        } catch (e) {
+          final error = PlaybackError(
+            kind: PlaybackErrorKind.permissionDenied,
+            rawMessage: 'Cannot access file ($e): $videoPath',
+            detectedAt: DateTime.now(),
+          );
+          _handlePlaybackError(error);
+          return false;
+        }
+      }
+    }
+
+    try {
+      await player.open(Media(videoPath), play: false);
+      return true;
+    } catch (e, stack) {
+      debugPrint('player.open failed: $e\n$stack');
+      final error = ref.read(mediaDiagnosticsServiceProvider).classifyRawError(e.toString());
+      _handlePlaybackError(error);
+      return false;
+    }
+  }
+
+  Future<bool> _playWithFaultTolerance() async {
+    try {
+      await player.play();
+      return true;
+    } catch (e) {
+      debugPrint('player.play failed: $e');
+      final error = ref.read(mediaDiagnosticsServiceProvider).classifyRawError(e.toString());
+      _handlePlaybackError(error);
+      return false;
+    }
   }
 
   void _onVideoEnded() {
@@ -744,7 +808,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       }
 
       final videoPath = active.path;
-      await player.open(Media(videoPath), play: false);
+      final opened = await _openMediaWithFaultTolerance(videoPath);
+      if (!opened) return;
 
       // Fetch and apply initial settings
       final settings = ref.read(playerSettingsProvider);
@@ -779,7 +844,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
         }
       }
 
-      await player.play();
+      final played = await _playWithFaultTolerance();
+      if (!played) return;
       if (mounted) {
         setState(() {
           subtitleTracks = player.state.tracks.subtitle;
@@ -870,7 +936,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
 
       // 4. Open the new video media in the player
       final videoPath = newVideo.path;
-      await player.open(Media(videoPath), play: false);
+      final opened = await _openMediaWithFaultTolerance(videoPath);
+      if (!opened) return;
 
       // 5. Apply settings
       final settings = ref.read(playerSettingsProvider);
@@ -906,7 +973,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       }
 
       // Otherwise, play directly
-      await player.play();
+      await _playWithFaultTolerance();
     } finally {
       _isChangingVideo = false;
     }
@@ -1490,11 +1557,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
     if (video == null) {
       try {
         ref.read(activeVideoProvider.notifier).state = null;
+        ref.read(activeVideoSessionIdProvider.notifier).state = null;
       } catch (_) {}
     } else {
       Future.microtask(() {
         if (mounted) {
           ref.read(activeVideoProvider.notifier).state = video;
+          ref.read(activeVideoSessionIdProvider.notifier).state = _sessionIdentity;
         }
       });
     }
@@ -1858,6 +1927,69 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
                                   fontStyle: FontStyle.italic,
                                   height: 1.4,
                                 ),
+                              ),
+                              const SizedBox(height: 10),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  InkWell(
+                                    onTap: () {
+                                      setState(() => _showPlaybackError = false);
+                                      if (_currentVideo != null) {
+                                        _loadVideo(_currentVideo!);
+                                      } else {
+                                        _initPlayback();
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEF4444).withValues(alpha: 0.25),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.5)),
+                                      ),
+                                      child: const Text(
+                                        'Retry',
+                                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ),
+                                  if (_currentIndex >= 0 && _currentIndex < _folderVideos.length - 1) ...[
+                                    const SizedBox(width: 8),
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() => _showPlaybackError = false);
+                                        _playNextVideo();
+                                      },
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white12,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.white24),
+                                        ),
+                                        child: const Text(
+                                          'Skip to Next',
+                                          style: TextStyle(color: Colors.white70, fontSize: 11),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(width: 8),
+                                  InkWell(
+                                    onTap: () => setState(() => _showPlaybackError = false),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                      child: Text(
+                                        'Dismiss',
+                                        style: TextStyle(color: Colors.white38, fontSize: 11),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),

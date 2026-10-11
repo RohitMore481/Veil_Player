@@ -271,9 +271,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
 
                   // Play/Pause Floating Action Button
                   GestureDetector(
-                    onTap: () {
-                      notifier.togglePlayPause();
-                    },
+                    onTap: queueState.isLoading
+                        ? null
+                        : () {
+                            notifier.togglePlayPause();
+                          },
                     child: Container(
                       width: 68,
                       height: 68,

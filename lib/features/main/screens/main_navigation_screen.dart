@@ -127,14 +127,13 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> wit
             ),
           ),
 
-          // 2. Persistent Audio Mini-Player (floats above navigation bar, music section only)
-          if (isMusic)
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 92,
-              child: AudioMiniPlayer(),
-            ),
+          // 2. Persistent Audio Mini-Player (floats above navigation bar across all sections)
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 92,
+            child: AudioMiniPlayer(),
+          ),
 
           // 3. Floating Pill Navigation Bar
           Positioned(

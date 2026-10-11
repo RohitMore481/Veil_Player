@@ -456,9 +456,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with AutomaticKee
               ),
             ),
 
-            // Spacer clearance at bottom
+            // Spacer clearance at bottom (clears floating nav bar & mini-player)
             const SliverToBoxAdapter(
-              child: SizedBox(height: 100),
+              child: SizedBox(height: 160),
             ),
           ],
         ),

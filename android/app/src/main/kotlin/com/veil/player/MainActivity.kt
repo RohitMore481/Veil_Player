@@ -5,6 +5,7 @@ import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.ClipData
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
@@ -608,6 +609,13 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: "Share Diagnostic Report"
                     shareReportFile(path, title, result)
                 }
+                "sendEmailBugReport" -> {
+                    val recipient = call.argument<String>("recipient") ?: ""
+                    val subject = call.argument<String>("subject") ?: "Veil Player Bug Report"
+                    val body = call.argument<String>("body") ?: ""
+                    val path = call.argument<String>("path") ?: ""
+                    sendEmailBugReport(recipient, subject, body, path, result)
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -1011,7 +1019,8 @@ class MainActivity : FlutterActivity() {
                     }
                 )
 
-                var selection: String? = null
+                val baseSelection = "${MediaStore.Video.Media.SIZE} > 0"
+                var selection: String? = baseSelection
                 var selectionArgs: Array<String>? = null
                 var canonicalFolder: String? = null
                 if (folderPath != null) {
@@ -1022,15 +1031,15 @@ class MainActivity : FlutterActivity() {
                     }
                     val fName = File(folderPath).name
                     if (fName.isNotEmpty()) {
-                        selection = "${MediaStore.Video.Media.DATA} LIKE ?"
+                        selection = "$baseSelection AND ${MediaStore.Video.Media.DATA} LIKE ?"
                         selectionArgs = arrayOf("%/$fName/%")
                     }
                 } else if (folderName != null) {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        selection = "${MediaStore.Video.Media.BUCKET_DISPLAY_NAME} LIKE ?"
+                        selection = "$baseSelection AND ${MediaStore.Video.Media.BUCKET_DISPLAY_NAME} LIKE ?"
                         selectionArgs = arrayOf(folderName)
                     } else {
-                        selection = "${MediaStore.Video.Media.DATA} LIKE ?"
+                        selection = "$baseSelection AND ${MediaStore.Video.Media.DATA} LIKE ?"
                         selectionArgs = arrayOf("%/$folderName/%")
                     }
                 }
@@ -1093,6 +1102,16 @@ class MainActivity : FlutterActivity() {
                         val duration = it.getLong(durationCol)
                         val size = it.getLong(sizeCol)
                         val dateAdded = it.getLong(dateCol)
+                        if (size <= 0 || path.isEmpty()) continue
+
+                        val pathLower = path.replace("\\", "/").lowercase()
+                        val titleLower = title.lowercase()
+                        if (titleLower.startsWith(".") || pathLower.contains("/.") ||
+                            pathLower.contains("/cache/") || pathLower.contains("/temp/") ||
+                            pathLower.contains("/thumbnail") ||
+                            pathLower.contains("/android/data/") || pathLower.contains("/android/obb/")) {
+                            continue
+                        }
 
                         var folder = ""
                         if (bucketCol != -1) {
@@ -1173,7 +1192,7 @@ class MainActivity : FlutterActivity() {
                     }
                 )
 
-                val cursor = contentResolver.query(uri, projection, null, null, null)
+                val cursor = contentResolver.query(uri, projection, "${MediaStore.Video.Media.SIZE} > 0", null, null)
                 cursor?.use {
                     val idCol = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                     val pathCol = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
@@ -3480,6 +3499,11 @@ class MainActivity : FlutterActivity() {
 
     private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         runOnUiThread {
+            // When VeilAudioService is actively running in foreground, music playback owns audio focus.
+            // Do not dispatch video audio focus loss to Flutter, which would prematurely pause music.
+            if (VeilAudioService.isRunning) {
+                return@runOnUiThread
+            }
             when (focusChange) {
                 AudioManager.AUDIOFOCUS_LOSS -> {
                     channel?.invokeMethod("onAudioFocusLoss", false)
@@ -3766,21 +3790,177 @@ class MainActivity : FlutterActivity() {
                     file
                 )
             } catch (e: Exception) {
-                Uri.fromFile(file)
+                result.error("FILE_PROVIDER_FAILED", "Could not create secure FileProvider URI: ${e.message}", null)
+                return
             }
 
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
+                clipData = ClipData.newRawUri("Diagnostic Report", contentUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
-            val chooser = Intent.createChooser(shareIntent, title)
+            val chooser = Intent.createChooser(shareIntent, title).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                clipData = ClipData.newRawUri("Diagnostic Report", contentUri)
+            }
             startActivity(chooser)
             result.success(true)
         } catch (e: Exception) {
             result.error("SHARE_REPORT_FAILED", e.message, null)
         }
+    }
+
+    private fun sendEmailBugReport(
+        recipient: String,
+        subject: String,
+        body: String,
+        path: String,
+        result: MethodChannel.Result
+    ) {
+        var contentUri: Uri? = null
+        try {
+            val file = File(path)
+            if (!file.exists() || file.length() == 0L) {
+                result.error("FILE_NOT_FOUND", "Diagnostic report file does not exist or is empty", null)
+                return
+            }
+
+            val uri = try {
+                androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    file
+                )
+            } catch (e: Exception) {
+                result.error("FILE_PROVIDER_FAILED", "Could not create secure FileProvider URI: ${e.message}", null)
+                return
+            }
+            contentUri = uri
+
+            // Packages to explicitly exclude (chat and messaging apps that may throw account/chat errors)
+            val excludedPackages = setOf(
+                "com.google.android.apps.dynamite", // Google Chat
+                "com.google.android.talk",          // Google Hangouts
+                "com.whatsapp",
+                "com.whatsapp.w4b",
+                "org.telegram.messenger",
+                "org.telegram.plus",
+                "com.discord",
+                "com.slack",
+                "com.facebook.orca",               // Messenger
+                "com.facebook.katana",
+                "com.twitter.android",
+                "com.instagram.android"
+            )
+
+            val emailSendToIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+            val emailResolvers = packageManager.queryIntentActivities(
+                emailSendToIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PackageManager.MATCH_DEFAULT_ONLY else 0
+            ).ifEmpty {
+                packageManager.queryIntentActivities(emailSendToIntent, 0)
+            }
+
+            val targetPackages = linkedSetOf<String>()
+            for (resolveInfo in emailResolvers) {
+                val pkg = resolveInfo.activityInfo.packageName
+                if (!excludedPackages.contains(pkg)) {
+                    targetPackages.add(pkg)
+                }
+            }
+
+            val wellKnownEmailPackages = listOf(
+                "com.google.android.gm",
+                "com.microsoft.office.outlook",
+                "com.samsung.android.email.provider",
+                "ch.protonmail.android",
+                "com.yahoo.mobile.client.android.mail",
+                "com.fsck.k9",
+                "org.k9doggers.k9"
+            )
+            for (pkg in wellKnownEmailPackages) {
+                if (!targetPackages.contains(pkg) && !excludedPackages.contains(pkg)) {
+                    try {
+                        packageManager.getPackageInfo(pkg, 0)
+                        targetPackages.add(pkg)
+                    } catch (_: Exception) {}
+                }
+            }
+
+            val targetedIntents = mutableListOf<Intent>()
+            for (pkg in targetPackages) {
+                try {
+                    grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+                    val emailIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        setPackage(pkg)
+                        if (recipient.isNotBlank()) {
+                            putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
+                        }
+                        putExtra(Intent.EXTRA_SUBJECT, subject)
+                        putExtra(Intent.EXTRA_TEXT, body)
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = ClipData.newRawUri("Diagnostic Report", uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        selector = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+                    }
+                    targetedIntents.add(emailIntent)
+                } catch (_: Exception) {}
+            }
+
+            if (targetedIntents.isNotEmpty()) {
+                val primary = targetedIntents.removeAt(0)
+                val chooser = Intent.createChooser(primary, "Send Bug Report via Email").apply {
+                    if (targetedIntents.isNotEmpty()) {
+                        putExtra(Intent.EXTRA_INITIAL_INTENTS, targetedIntents.toTypedArray())
+                    }
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    clipData = ClipData.newRawUri("Diagnostic Report", uri)
+                }
+                startActivity(chooser)
+                result.success(mapOf("status" to "email_opened", "fallbackUsed" to false))
+                return
+            }
+
+            openShareFallback(contentUri, recipient, subject, body, result)
+        } catch (e: Exception) {
+            try {
+                val streamUri = contentUri ?: return result.error("EMAIL_REPORT_FAILED", e.message, null)
+                openShareFallback(streamUri, recipient, subject, body, result)
+            } catch (fallbackError: Exception) {
+                result.error("EMAIL_REPORT_FAILED", fallbackError.message, null)
+            }
+        }
+    }
+
+    private fun openShareFallback(
+        uri: Uri,
+        recipient: String,
+        subject: String,
+        body: String,
+        result: MethodChannel.Result
+    ) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            if (recipient.isNotBlank()) {
+                putExtra(Intent.EXTRA_EMAIL, arrayOf(recipient))
+            }
+            putExtra(Intent.EXTRA_SUBJECT, subject)
+            putExtra(Intent.EXTRA_TEXT, body)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newRawUri("Diagnostic Report", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        val fallbackChooser = Intent.createChooser(shareIntent, "Share Diagnostic Bug Report").apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newRawUri("Diagnostic Report", uri)
+        }
+        startActivity(fallbackChooser)
+        result.success(mapOf("status" to "share_fallback_opened", "fallbackUsed" to true))
     }
 
     private fun setSessionActive(active: Boolean) {

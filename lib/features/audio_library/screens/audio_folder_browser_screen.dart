@@ -92,12 +92,28 @@ class _AudioFolderBrowserScreenState
                     ),
                     const SizedBox(width: 8),
                   ],
-                  Text(
-                    widget.isQuickAccess ? 'Quick Access' : 'Storage',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        widget.isQuickAccess ? 'Quick Access' : 'Storage',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (foldersAsync.valueOrNull != null) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          '(${foldersAsync.valueOrNull!.length} ${foldersAsync.valueOrNull!.length == 1 ? 'folder' : 'folders'})',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.5),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const Spacer(),
                   IconButton(
@@ -168,7 +184,7 @@ class _AudioFolderBrowserScreenState
                       left: 16.0,
                       right: 16.0,
                       top: 12.0,
-                      bottom: 120.0,
+                      bottom: 160.0,
                     ),
                     itemCount: folders.length,
                     itemBuilder: (context, index) {
