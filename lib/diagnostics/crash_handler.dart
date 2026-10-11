@@ -37,6 +37,16 @@ class CrashHandler {
         event: 'Flutter framework error in $contextStr: $exceptionStr',
       );
 
+      // Record confirmed crash marker synchronously/asynchronously
+      unawaited(
+        DiagnosticService.instance.sessionMarkerManager.recordConfirmedCrash(
+          sessionId: DiagnosticService.instance.sessionId,
+          errorType: 'FLUTTER_ERROR',
+          exception: exceptionStr,
+          stackTrace: details.stack?.toString(),
+        ),
+      );
+
       unawaited(
         DiagnosticService.instance.createCrashReport(
           exception: exceptionStr,
@@ -55,6 +65,15 @@ class CrashHandler {
         category: DiagnosticCategory.error,
         severity: DiagnosticSeverity.critical,
         event: 'Async platform error: $exceptionStr',
+      );
+
+      unawaited(
+        DiagnosticService.instance.sessionMarkerManager.recordConfirmedCrash(
+          sessionId: DiagnosticService.instance.sessionId,
+          errorType: 'DART_ASYNC_ERROR',
+          exception: exceptionStr,
+          stackTrace: stack.toString(),
+        ),
       );
 
       unawaited(

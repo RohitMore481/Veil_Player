@@ -374,4 +374,61 @@ class MediaService {
       return false;
     }
   }
+
+  Future<bool> startAudioService({
+    required String title,
+    required String artist,
+    required bool isPlaying,
+    required int positionMs,
+    required int durationMs,
+  }) async {
+    try {
+      final bool? result = await _channel.invokeMethod(
+        'startAudioService',
+        {
+          'title': title,
+          'artist': artist,
+          'isPlaying': isPlaying,
+          'position': positionMs,
+          'duration': durationMs,
+        },
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> updateAudioService({
+    required String title,
+    required String artist,
+    required bool isPlaying,
+    required int positionMs,
+    required int durationMs,
+  }) async {
+    try {
+      final bool? result = await _channel.invokeMethod(
+        'updateAudioService',
+        {
+          'title': title,
+          'artist': artist,
+          'isPlaying': isPlaying,
+          'position': positionMs,
+          'duration': durationMs,
+        },
+      );
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> stopAudioService() async {
+    try {
+      final bool? result = await _channel.invokeMethod('stopAudioService');
+      return result ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

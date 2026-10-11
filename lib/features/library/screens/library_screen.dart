@@ -14,6 +14,7 @@ import '../providers/media_provider.dart';
 import '../widgets/library_bottom_sheets.dart';
 import '../../folders/widgets/manage_pinned_folders_dialog.dart';
 import '../../file_operations/widgets/file_clipboard_bar.dart';
+import '../../main/widgets/media_section_switcher.dart';
 import 'search_screen.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -138,10 +139,10 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with AutomaticKee
             CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Top Header Bar
+            // Row 1: Shared App Header
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
+                padding: const EdgeInsets.fromLTRB(16.0, 14.0, 16.0, 10.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -202,6 +203,17 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with AutomaticKee
                       ],
                     ),
                   ],
+                ),
+              ),
+            ),
+
+            // Row 2: Media Section Switcher
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(20.0, 0, 16.0, 14.0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: MediaSectionSwitcher(),
                 ),
               ),
             ),

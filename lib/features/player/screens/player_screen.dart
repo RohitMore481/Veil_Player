@@ -28,6 +28,7 @@ import '../providers/active_video_provider.dart';
 import '../widgets/focus_mode_permission_sheet.dart';
 import '../../../diagnostics/diagnostic_service.dart';
 import '../../../diagnostics/diagnostic_event.dart';
+import '../../../core/media_coordinator/media_coordinator.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final VideoItem? video;
@@ -216,6 +217,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       }
     } catch (_) {}
 
+    MediaCoordinator.instance.unregisterVideoSession();
+
     if (_isFocusModeActive) {
       _isFocusModeActive = false;
       try {
@@ -369,6 +372,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBinding
       severity: DiagnosticSeverity.info,
       event: 'Player initialized',
     );
+
+    MediaCoordinator.instance.onVideoStarting();
+    MediaCoordinator.instance.registerVideoSession(pauseVideo: () {
+      try {
+        player.pause();
+      } catch (_) {}
+    });
 
     _initPlayback();
     _initSettings();

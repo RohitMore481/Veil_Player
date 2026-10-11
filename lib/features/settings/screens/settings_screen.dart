@@ -4,6 +4,8 @@ import '../../player/providers/player_settings_provider.dart';
 import '../../library/providers/media_provider.dart';
 import '../../library/services/media_service.dart';
 import '../../player/widgets/focus_mode_permission_sheet.dart';
+import '../../audio_library/models/audio_queue_state.dart';
+import '../../audio_library/providers/audio_player_provider.dart';
 import 'diagnostics_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -24,6 +26,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with AutomaticK
     final settings = ref.watch(playerSettingsProvider);
     final notifier = ref.read(playerSettingsProvider.notifier);
     final subSettings = settings.subtitleSettings;
+    final audioSettings = ref.watch(audioSettingsProvider);
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -231,6 +234,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with AutomaticK
                 options: ['Emerald', 'Ruby Red', 'Sapphire Blue', 'Amber Gold', 'Nothing Silver'],
                 currentValue: settings.themeAccent,
                 onSelected: (val) => notifier.setThemeAccent(val),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
+          _buildSectionHeader(theme, 'Music & Audio'),
+          _buildSwitchTile(
+            title: 'Pause on Headphone Disconnect',
+            subtitle: 'Automatically pause audio when headphones or Bluetooth disconnect',
+            value: audioSettings.pauseOnHeadsetDisconnect,
+            onChanged: (val) => ref.read(audioSettingsProvider.notifier).setPauseOnHeadsetDisconnect(val),
+          ),
+          _buildSwitchTile(
+            title: 'Default Shuffle',
+            subtitle: 'Start new audio queues in shuffle mode by default',
+            value: audioSettings.defaultShuffle,
+            onChanged: (val) => ref.read(audioSettingsProvider.notifier).setDefaultShuffle(val),
+          ),
+          _buildSelectionTile(
+            title: 'Default Repeat Mode',
+            subtitle: switch (audioSettings.defaultRepeatMode) {
+              AudioRepeatMode.off => 'Off',
+              AudioRepeatMode.all => 'Repeat All',
+              AudioRepeatMode.one => 'Repeat One',
+            },
+            onTap: () {
+              _showSelectionDialog(
+                title: 'Default Repeat Mode',
+                options: ['Off', 'Repeat All', 'Repeat One'],
+                currentValue: switch (audioSettings.defaultRepeatMode) {
+                  AudioRepeatMode.off => 'Off',
+                  AudioRepeatMode.all => 'Repeat All',
+                  AudioRepeatMode.one => 'Repeat One',
+                },
+                onSelected: (val) {
+                  final mode = switch (val) {
+                    'Repeat All' => AudioRepeatMode.all,
+                    'Repeat One' => AudioRepeatMode.one,
+                    _ => AudioRepeatMode.off,
+                  };
+                  ref.read(audioSettingsProvider.notifier).setDefaultRepeatMode(mode);
+                },
               );
             },
           ),

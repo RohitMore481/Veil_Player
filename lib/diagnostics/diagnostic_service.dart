@@ -12,6 +12,7 @@ import 'diagnostic_report.dart';
 import 'diagnostic_sanitizer.dart';
 import 'diagnostic_storage.dart';
 import 'responsiveness_monitor.dart';
+import 'session_marker_manager.dart';
 
 final diagnosticServiceProvider = Provider<DiagnosticService>((ref) {
   final service = DiagnosticService.instance;
@@ -32,6 +33,7 @@ class DiagnosticService with WidgetsBindingObserver {
 
   final DiagnosticEventBuffer eventBuffer = DiagnosticEventBuffer(capacity: 150);
   final DiagnosticStorage storage = DiagnosticStorage();
+  final SessionMarkerManager sessionMarkerManager = SessionMarkerManager();
   late final ResponsivenessMonitor responsivenessMonitor;
 
   static const _channel = MethodChannel('veil_player/media');
@@ -44,7 +46,11 @@ class DiagnosticService with WidgetsBindingObserver {
   Map<String, String>? currentPlaybackContext;
 
   bool _initialized = false;
-  bool _previousSessionWasUnexpected = false;
+  bool _wasPreviousSessionConfirmedCrash = false;
+  PreviousSessionOutcome? previousSessionOutcome;
+
+  bool get wasPreviousSessionUnexpected => _wasPreviousSessionConfirmedCrash;
+  bool get wasPreviousSessionConfirmedCrash => _wasPreviousSessionConfirmedCrash;
 
   DiagnosticService._internal() {
     responsivenessMonitor = ResponsivenessMonitor(
@@ -71,12 +77,15 @@ class DiagnosticService with WidgetsBindingObserver {
     // Start responsiveness monitor
     responsivenessMonitor.start();
 
-    // Check if previous session ended unexpectedly
+    // Check previous session state using robust SessionMarkerManager
     await _checkPreviousSession();
 
-    // Set startup session marker once initial frame is rendered and active
+    // Ensure session marker is registered for active session
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _updateSessionMarker(active: true);
+      await sessionMarkerManager.updateLifecycleState(
+        sessionId: sessionId,
+        state: 'foreground',
+      );
     });
   }
 
@@ -408,42 +417,55 @@ class DiagnosticService with WidgetsBindingObserver {
     }
   }
 
-  /// Checks if previous session had an unexpected termination.
+  /// Evaluates previous session using [SessionMarkerManager].
+  /// Never misdiagnoses normal app backgrounding or recents swipe as a crash.
   Future<void> _checkPreviousSession() async {
     try {
-      final wasActive = await _getSavedSetting('session_active', 'bool');
-      if (wasActive == true) {
-        _previousSessionWasUnexpected = true;
+      final evaluation = await sessionMarkerManager.evaluatePreviousSession();
+      previousSessionOutcome = evaluation.outcome;
+
+      if (evaluation.hasConfirmedCrash && evaluation.crashData != null) {
+        _wasPreviousSessionConfirmedCrash = true;
+        final crash = evaluation.crashData!;
         recordEvent(
-          category: DiagnosticCategory.lifecycle,
-          severity: DiagnosticSeverity.warning,
-          event: 'Previous session appears to have ended unexpectedly',
+          category: DiagnosticCategory.error,
+          severity: DiagnosticSeverity.critical,
+          event: 'Confirmed previous session fatal crash: ${crash.errorType} - ${crash.exception}',
         );
 
-        // Immediately reset session marker so we don't duplicate reports
-        await _updateSessionMarker(active: false);
-
-        // Record conservative report for unexpected process termination
-        unawaited(createAnomalyReport(
-          type: ReportType.unexpectedSessionTermination,
-          category: 'LIFECYCLE',
-          exceptionMessage: 'Previous session ended unexpectedly (process termination / unexpected exit)',
-          stackTrace: null,
+        // Record verified crash report
+        unawaited(createCrashReport(
+          exception: crash.exception,
+          stack: crash.stackTrace != null
+              ? StackTrace.fromString(crash.stackTrace!)
+              : null,
+          context: 'PreviousSession.${crash.errorType}',
         ));
+      } else {
+        _wasPreviousSessionConfirmedCrash = false;
+        final outcomeMsg = switch (evaluation.outcome) {
+          PreviousSessionOutcome.cleanExit => 'Previous session ended cleanly',
+          PreviousSessionOutcome.backgroundTerminated =>
+            'Previous session ended normally in background (OS reclamation / user task removal)',
+          PreviousSessionOutcome.unresolvedTermination =>
+            'Previous session ended normally (app closed / task removed)',
+          _ => 'Initial application launch',
+        };
+        recordEvent(
+          category: DiagnosticCategory.lifecycle,
+          severity: DiagnosticSeverity.info,
+          event: outcomeMsg,
+        );
       }
-    } catch (e) {
-      // Ignore
-    }
-  }
 
-  /// Updates session marker in SharedPreferences via native MethodChannel.
-  Future<void> _updateSessionMarker({required bool active}) async {
-    try {
-      await _channel.invokeMethod('savePlayerSetting', {
-        'key': 'session_active',
-        'value': active,
-      });
-    } catch (_) {}
+      // Initialize lifecycle marker for this active session
+      await sessionMarkerManager.updateLifecycleState(
+        sessionId: sessionId,
+        state: 'foreground',
+      );
+    } catch (e) {
+      debugPrint('[DiagnosticService] _checkPreviousSession error: $e');
+    }
   }
 
   @override
@@ -452,7 +474,10 @@ class DiagnosticService with WidgetsBindingObserver {
       case AppLifecycleState.resumed:
         currentAppState = 'Foreground';
         responsivenessMonitor.start();
-        _updateSessionMarker(active: true);
+        sessionMarkerManager.updateLifecycleState(
+          sessionId: sessionId,
+          state: 'foreground',
+        );
         recordEvent(
           category: DiagnosticCategory.lifecycle,
           severity: DiagnosticSeverity.info,
@@ -461,6 +486,10 @@ class DiagnosticService with WidgetsBindingObserver {
         break;
       case AppLifecycleState.inactive:
         currentAppState = 'Inactive';
+        sessionMarkerManager.updateLifecycleState(
+          sessionId: sessionId,
+          state: 'inactive',
+        );
         recordEvent(
           category: DiagnosticCategory.lifecycle,
           severity: DiagnosticSeverity.info,
@@ -470,7 +499,10 @@ class DiagnosticService with WidgetsBindingObserver {
       case AppLifecycleState.paused:
         currentAppState = 'Background';
         responsivenessMonitor.stop();
-        _updateSessionMarker(active: false);
+        sessionMarkerManager.updateLifecycleState(
+          sessionId: sessionId,
+          state: 'background',
+        );
         recordEvent(
           category: DiagnosticCategory.lifecycle,
           severity: DiagnosticSeverity.info,
@@ -480,7 +512,10 @@ class DiagnosticService with WidgetsBindingObserver {
       case AppLifecycleState.detached:
         currentAppState = 'Detached';
         responsivenessMonitor.stop();
-        _updateSessionMarker(active: false);
+        sessionMarkerManager.updateLifecycleState(
+          sessionId: sessionId,
+          state: 'clean_exit',
+        );
         recordEvent(
           category: DiagnosticCategory.lifecycle,
           severity: DiagnosticSeverity.info,
@@ -490,7 +525,10 @@ class DiagnosticService with WidgetsBindingObserver {
       case AppLifecycleState.hidden:
         currentAppState = 'Hidden';
         responsivenessMonitor.stop();
-        _updateSessionMarker(active: false);
+        sessionMarkerManager.updateLifecycleState(
+          sessionId: sessionId,
+          state: 'hidden',
+        );
         break;
     }
   }
@@ -498,7 +536,10 @@ class DiagnosticService with WidgetsBindingObserver {
   /// Called on clean app shutdown or backgrounding.
   Future<void> onAppPausedOrClosed() async {
     responsivenessMonitor.stop();
-    await _updateSessionMarker(active: false);
+    await sessionMarkerManager.updateLifecycleState(
+      sessionId: sessionId,
+      state: 'clean_exit',
+    );
   }
 
   /// Dispose diagnostic service observer.
@@ -525,14 +566,6 @@ class DiagnosticService with WidgetsBindingObserver {
       'app_version': '1.0.0',
       'build_number': '1',
     };
-  }
-
-  Future<dynamic> _getSavedSetting(String key, String type) async {
-    try {
-      return await _channel.invokeMethod('getPlayerSetting', {'key': key, 'type': type});
-    } catch (_) {
-      return null;
-    }
   }
 
   /// Loads all stored reports.
@@ -590,6 +623,4 @@ class DiagnosticService with WidgetsBindingObserver {
       return false;
     }
   }
-
-  bool get wasPreviousSessionUnexpected => _previousSessionWasUnexpected;
 }

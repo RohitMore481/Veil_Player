@@ -35,6 +35,23 @@ import java.util.LinkedHashSet
 import kotlin.concurrent.thread
 
 class MainActivity : FlutterActivity() {
+    companion object {
+        var activeChannel: MethodChannel? = null
+            private set
+
+        fun sendMediaCommand(method: String, args: Any?) {
+            activeChannel?.let { ch ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    try {
+                        ch.invokeMethod(method, args)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+    }
+
     private val CHANNEL = "veil_player/media"
     private val PERMISSION_REQUEST_CODE = 4567
     private var mediaSession: MediaSession? = null
@@ -174,6 +191,7 @@ class MainActivity : FlutterActivity() {
 
         val mChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         channel = mChannel
+        activeChannel = mChannel
         mChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "checkPermission" -> {
@@ -227,6 +245,44 @@ class MainActivity : FlutterActivity() {
                 }
                 "getAudioFolders" -> {
                     getAudioFolders(result)
+                }
+                "renameAudio" -> {
+                    val id = call.argument<String>("id")
+                    val path = call.argument<String>("path") ?: ""
+                    val newName = call.argument<String>("newName") ?: ""
+                    if (id != null && path.isNotEmpty() && newName.isNotEmpty()) {
+                        renameAudio(id, path, newName, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "id, path, and newName are required", null)
+                    }
+                }
+                "deleteAudio" -> {
+                    val id = call.argument<String>("id")
+                    val path = call.argument<String>("path") ?: ""
+                    if (id != null && path.isNotEmpty()) {
+                        deleteAudio(id, path, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "id and path are required", null)
+                    }
+                }
+                "copyAudio" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (path.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        copyVideo(path, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "path and targetFolder are required", null)
+                    }
+                }
+                "moveAudio" -> {
+                    val id = call.argument<String>("id") ?: ""
+                    val path = call.argument<String>("path") ?: ""
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (path.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        moveAudio(id, path, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "path and targetFolder are required", null)
+                    }
                 }
                 "renameVideo" -> {
                     val id = call.argument<String>("id")
@@ -465,6 +521,50 @@ class MainActivity : FlutterActivity() {
                     val position = call.argument<Number>("position")?.toLong() ?: 0L
                     val duration = call.argument<Number>("duration")?.toLong() ?: 0L
                     updateActiveMediaSession(title, isPlaying, position, duration)
+                    result.success(true)
+                }
+                "startAudioService", "updateAudioService" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: false
+                    val position = call.argument<Number>("position")?.toLong() ?: 0L
+                    val duration = call.argument<Number>("duration")?.toLong() ?: 0L
+
+                    val intent = Intent(this, VeilAudioService::class.java).apply {
+                        action = VeilAudioService.ACTION_UPDATE
+                        putExtra(VeilAudioService.EXTRA_TITLE, title)
+                        putExtra(VeilAudioService.EXTRA_ARTIST, artist)
+                        putExtra(VeilAudioService.EXTRA_IS_PLAYING, isPlaying)
+                        putExtra(VeilAudioService.EXTRA_POSITION, position)
+                        putExtra(VeilAudioService.EXTRA_DURATION, duration)
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(intent)
+                    } else {
+                        startService(intent)
+                    }
+                    result.success(true)
+                }
+                "stopAudioService" -> {
+                    val intent = Intent(this, VeilAudioService::class.java).apply {
+                        action = VeilAudioService.ACTION_STOP
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                "getNativeCrashMarker" -> {
+                    val file = File(filesDir, "native_crash_marker.txt")
+                    if (file.exists()) {
+                        result.success(file.readText())
+                    } else {
+                        result.success(null)
+                    }
+                }
+                "clearNativeCrashMarker" -> {
+                    val file = File(filesDir, "native_crash_marker.txt")
+                    if (file.exists()) {
+                        file.delete()
+                    }
                     result.success(true)
                 }
                 "isNotificationPolicyAccessGranted" -> {
@@ -2746,6 +2846,231 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun renameAudio(audioId: String, oldPath: String, newName: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val oldFile = File(oldPath)
+                val ext = oldFile.extension
+                var finalNewName = newName
+                if (ext.isNotEmpty() && !newName.endsWith(".$ext", ignoreCase = true)) {
+                    finalNewName = "$newName.$ext"
+                }
+
+                val parent = oldFile.parentFile
+                val newFile = File(parent, finalNewName)
+
+                var renameSuccess = false
+                try {
+                    renameSuccess = oldFile.renameTo(newFile)
+                } catch (e: Exception) {}
+
+                val values = android.content.ContentValues().apply {
+                    put(MediaStore.Audio.Media.DISPLAY_NAME, finalNewName)
+                    val titleWithoutExt = if (finalNewName.contains(".")) finalNewName.substringBeforeLast(".") else finalNewName
+                    put(MediaStore.Audio.Media.TITLE, titleWithoutExt)
+                }
+
+                val audioIdLong = audioId.toLongOrNull()
+                val audioUri = if (audioIdLong != null) {
+                    ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, audioIdLong)
+                } else null
+
+                if (renameSuccess) {
+                    if (audioUri != null) {
+                        values.put(MediaStore.Audio.Media.DATA, newFile.absolutePath)
+                        try {
+                            contentResolver.update(audioUri, values, null, null)
+                        } catch (e: Exception) {}
+                    }
+                    scanFiles(arrayOf(oldFile.absolutePath, newFile.absolutePath)) {
+                        runOnUiThread { result.success("success") }
+                    }
+                    return@thread
+                }
+
+                val docUri = getDocumentUriForPath(oldPath)
+                if (docUri != null) {
+                    val newDocUri = renameDocFile(docUri, finalNewName)
+                    if (newDocUri != null) {
+                        if (audioUri != null) {
+                            values.put(MediaStore.Audio.Media.DATA, newFile.absolutePath)
+                            try {
+                                contentResolver.update(audioUri, values, null, null)
+                            } catch (e: Exception) {}
+                        }
+                        scanFiles(arrayOf(oldFile.absolutePath, newFile.absolutePath)) {
+                            runOnUiThread { result.success("success") }
+                        }
+                        return@thread
+                    }
+                }
+
+                if (audioUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        val updatedRows = contentResolver.update(audioUri, values, null, null)
+                        if (updatedRows > 0) {
+                            val newPathEstim = oldFile.parentFile?.let { File(it, finalNewName).absolutePath }
+                            if (newPathEstim != null) {
+                                scanFiles(arrayOf(oldFile.absolutePath, newPathEstim)) {
+                                    runOnUiThread { result.success("success") }
+                                }
+                            } else {
+                                runOnUiThread { result.success("success") }
+                            }
+                        } else {
+                            runOnUiThread { result.success("permission_required") }
+                        }
+                    } catch (e: SecurityException) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            val uris = listOf(audioUri)
+                            val pendingIntent = MediaStore.createWriteRequest(contentResolver, uris)
+                            val code = getNextRequestCode()
+                            pendingRenameActions[code] = PendingRenameAction(audioId, oldPath, finalNewName, result)
+                            pendingWriteResults[code] = result
+                            runOnUiThread {
+                                try {
+                                    startIntentSenderForResult(
+                                        pendingIntent.intentSender,
+                                        code,
+                                        null, 0, 0, 0
+                                    )
+                                } catch (ex: Exception) {
+                                    pendingWriteResults.remove(code)
+                                    pendingRenameActions.remove(code)
+                                    result.error("RENAME_FAILED", ex.message, null)
+                                }
+                            }
+                        } else {
+                            runOnUiThread { result.success("permission_required") }
+                        }
+                    }
+                } else {
+                    runOnUiThread { result.success("permission_required") }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("RENAME_FAILED", e.message, null)
+                }
+            }
+        }
+    }
+
+    private fun deleteAudio(audioId: String, path: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val file = File(path)
+                val audioIdLong = audioId.toLongOrNull()
+                val audioUri = if (audioIdLong != null) {
+                    ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, audioIdLong)
+                } else null
+
+                var physicallyDeleted = false
+                try {
+                    if (file.exists()) {
+                        physicallyDeleted = file.delete()
+                    } else {
+                        physicallyDeleted = true
+                    }
+                } catch (e: Exception) {}
+
+                if (physicallyDeleted) {
+                    if (audioUri != null) {
+                        try { contentResolver.delete(audioUri, null, null) } catch (e: Exception) {}
+                    }
+                    scanFiles(arrayOf(path)) {
+                        runOnUiThread { result.success("success") }
+                    }
+                    return@thread
+                }
+
+                val docUri = getDocumentUriForPath(path)
+                if (docUri != null) {
+                    val safDeleted = deleteDocFile(docUri)
+                    if (safDeleted) {
+                        if (audioUri != null) {
+                            try { contentResolver.delete(audioUri, null, null) } catch (e: Exception) {}
+                        }
+                        scanFiles(arrayOf(path)) {
+                            runOnUiThread { result.success("success") }
+                        }
+                        return@thread
+                    }
+                }
+
+                if (audioUri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val uris = listOf(audioUri)
+                    val pendingIntent = MediaStore.createDeleteRequest(contentResolver, uris)
+                    val code = getNextRequestCode()
+                    pendingDeleteResults[code] = result
+                    runOnUiThread {
+                        try {
+                            startIntentSenderForResult(
+                                pendingIntent.intentSender,
+                                code,
+                                null, 0, 0, 0
+                            )
+                        } catch (ex: Exception) {
+                            pendingDeleteResults.remove(code)
+                            result.error("DELETE_FAILED", ex.message, null)
+                        }
+                    }
+                } else {
+                    runOnUiThread { result.success("permission_required") }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("DELETE_FAILED", e.message, null)
+                }
+            }
+        }
+    }
+
+    private fun moveAudio(audioId: String, sourcePath: String, targetFolder: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val sourceFile = File(sourcePath)
+                if (!sourceFile.exists() || !sourceFile.isFile) {
+                    runOnUiThread { result.error("FILE_NOT_FOUND", "Source audio does not exist", null) }
+                    return@thread
+                }
+                val targetDir = File(targetFolder)
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+
+                if (sourceFile.parentFile?.canonicalPath == targetDir.canonicalPath) {
+                    runOnUiThread { result.error("SAME_FOLDER", "Source and destination are the same folder", null) }
+                    return@thread
+                }
+
+                val targetFile = getUniqueFile(targetDir, sourceFile.name)
+                var moved = false
+                try {
+                    moved = sourceFile.renameTo(targetFile)
+                } catch (e: Exception) {}
+
+                if (!moved) {
+                    if (copyVideoFileInternal(sourceFile, targetFile)) {
+                        try {
+                            sourceFile.delete()
+                        } catch (e: Exception) {}
+                        moved = true
+                    }
+                }
+
+                if (moved) {
+                    scanFiles(arrayOf(sourcePath, targetFile.absolutePath)) {
+                        runOnUiThread { result.success("success") }
+                    }
+                } else {
+                    runOnUiThread { result.error("MOVE_FAILED", "Failed to move audio", null) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("MOVE_FAILED", e.message, null) }
+            }
+        }
+    }
+
     private fun renameFolder(oldPath: String, newName: String, result: MethodChannel.Result) {
         thread {
             try {
@@ -3371,6 +3696,9 @@ class MainActivity : FlutterActivity() {
         }
         thread {
             trimThumbnailCache()
+        }
+        if (activeChannel == channel) {
+            activeChannel = null
         }
         super.onDestroy()
     }

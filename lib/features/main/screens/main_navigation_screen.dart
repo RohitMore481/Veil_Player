@@ -9,6 +9,10 @@ import '../../settings/screens/settings_screen.dart';
 import '../../settings/screens/diagnostics_screen.dart';
 import '../../library/providers/media_provider.dart';
 import 'package:veil_player/diagnostics/diagnostic_service.dart';
+import '../providers/media_section_provider.dart';
+import '../../audio_library/screens/music_library_screen.dart';
+import '../../audio_library/screens/audio_folder_browser_screen.dart';
+import '../../audio_library/widgets/audio_mini_player.dart';
 
 class MainNavigationScreen extends ConsumerStatefulWidget {
   const MainNavigationScreen({super.key});
@@ -21,12 +25,6 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> wit
   int _currentIndex = 0;
   late PageController _pageController;
   late ValueNotifier<double> _pagePositionNotifier;
-
-  final List<Widget> _screens = [
-    const LibraryScreen(key: ValueKey<int>(0)),
-    const FolderBrowserScreen(key: ValueKey<int>(1)),
-    const SettingsScreen(key: ValueKey<int>(2)),
-  ];
 
   @override
   void initState() {
@@ -90,6 +88,19 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> wit
     final size = MediaQuery.of(context).size;
     final isLandscape = size.width > size.height;
 
+    final mediaSection = ref.watch(mediaSectionProvider);
+    final isMusic = mediaSection == MediaSection.music;
+
+    final screens = [
+      isMusic
+          ? const MusicLibraryScreen(key: ValueKey<String>('music_lib'))
+          : const LibraryScreen(key: ValueKey<String>('video_lib')),
+      isMusic
+          ? const AudioFolderBrowserScreen(key: ValueKey<String>('audio_folders'))
+          : const FolderBrowserScreen(key: ValueKey<String>('video_folders')),
+      const SettingsScreen(key: ValueKey<String>('settings')),
+    ];
+
     // Responsive width for floating pill
     final double pillWidth = isLandscape ? 380.0 : size.width - 48.0;
     // Calculate sliding indicator size
@@ -112,11 +123,20 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> wit
                   });
                 }
               },
-              children: _screens,
+              children: screens,
             ),
           ),
 
-          // 2. Floating Pill Navigation Bar
+          // 2. Persistent Audio Mini-Player (floats above navigation bar, music section only)
+          if (isMusic)
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 92,
+              child: AudioMiniPlayer(),
+            ),
+
+          // 3. Floating Pill Navigation Bar
           Positioned(
             left: 0,
             right: 0,
@@ -179,7 +199,13 @@ class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> wit
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              _buildNavItem(0, Icons.movie_filter_outlined, Icons.movie_filter, 'Library', theme),
+                              _buildNavItem(
+                                0,
+                                isMusic ? Icons.music_note_outlined : Icons.movie_filter_outlined,
+                                isMusic ? Icons.music_note : Icons.movie_filter,
+                                isMusic ? 'Music' : 'Videos',
+                                theme,
+                              ),
                               _buildNavItem(1, Icons.folder_open_outlined, Icons.folder, 'Folders', theme),
                               _buildNavItem(2, Icons.settings_outlined, Icons.settings, 'Settings', theme),
                             ],
@@ -331,4 +357,3 @@ class _NavBarTabButtonState extends State<_NavBarTabButton> with SingleTickerPro
     );
   }
 }
-
