@@ -15,6 +15,7 @@ class PlayerSettingsState {
   final bool amoledPureBlack;
   final String themeAccent;
   final String themeMode;
+  final String focusMode; // 'OFF', 'ON', 'AUTO'
 
   PlayerSettingsState({
     required this.preferredAspectRatio,
@@ -28,6 +29,7 @@ class PlayerSettingsState {
     required this.amoledPureBlack,
     required this.themeAccent,
     required this.themeMode,
+    required this.focusMode,
   });
 
   PlayerSettingsState copyWith({
@@ -42,6 +44,7 @@ class PlayerSettingsState {
     bool? amoledPureBlack,
     String? themeAccent,
     String? themeMode,
+    String? focusMode,
   }) {
     return PlayerSettingsState(
       preferredAspectRatio: preferredAspectRatio ?? this.preferredAspectRatio,
@@ -55,6 +58,7 @@ class PlayerSettingsState {
       amoledPureBlack: amoledPureBlack ?? this.amoledPureBlack,
       themeAccent: themeAccent ?? this.themeAccent,
       themeMode: themeMode ?? this.themeMode,
+      focusMode: focusMode ?? this.focusMode,
     );
   }
 }
@@ -63,8 +67,7 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
   final MediaRepository _repository;
 
   PlayerSettingsNotifier(this._repository)
-    : super(
-        PlayerSettingsState(
+      : super(PlayerSettingsState(
           preferredAspectRatio: 'Fit',
           subtitleSettings: const SubtitleSettings(),
           autoResume: true,
@@ -76,8 +79,8 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
           amoledPureBlack: true,
           themeAccent: 'Emerald',
           themeMode: 'Dark',
-        ),
-      ) {
+          focusMode: 'OFF',
+        )) {
     loadSettings();
   }
 
@@ -103,6 +106,8 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
       final accent = allSettings['theme_accent'];
       final tMode = allSettings['theme_mode'];
 
+      final fMode = allSettings['focus_mode'];
+
       state = PlayerSettingsState(
         preferredAspectRatio: (aspect as String?) ?? 'Fit',
         subtitleSettings: SubtitleSettings(
@@ -122,6 +127,7 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
         amoledPureBlack: (amoled as bool?) ?? true,
         themeAccent: (accent as String?) ?? 'Emerald',
         themeMode: (tMode as String?) ?? 'Dark',
+        focusMode: (fMode as String?) ?? 'OFF',
       );
     } catch (_) {}
   }
@@ -133,30 +139,12 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
 
   Future<void> updateSubtitleSettings(SubtitleSettings subtitleSettings) async {
     state = state.copyWith(subtitleSettings: subtitleSettings);
-    await _repository.savePlayerSetting(
-      'subtitle_enabled',
-      subtitleSettings.enabled,
-    );
-    await _repository.savePlayerSetting(
-      'subtitle_font_size',
-      subtitleSettings.fontSize,
-    );
-    await _repository.savePlayerSetting(
-      'subtitle_text_color',
-      subtitleSettings.textColor,
-    );
-    await _repository.savePlayerSetting(
-      'subtitle_bg_color',
-      subtitleSettings.backgroundColor,
-    );
-    await _repository.savePlayerSetting(
-      'subtitle_vertical_position',
-      subtitleSettings.verticalPosition,
-    );
-    await _repository.savePlayerSetting(
-      'subtitle_opacity',
-      subtitleSettings.opacity,
-    );
+    await _repository.savePlayerSetting('subtitle_enabled', subtitleSettings.enabled);
+    await _repository.savePlayerSetting('subtitle_font_size', subtitleSettings.fontSize);
+    await _repository.savePlayerSetting('subtitle_text_color', subtitleSettings.textColor);
+    await _repository.savePlayerSetting('subtitle_bg_color', subtitleSettings.backgroundColor);
+    await _repository.savePlayerSetting('subtitle_vertical_position', subtitleSettings.verticalPosition);
+    await _repository.savePlayerSetting('subtitle_opacity', subtitleSettings.opacity);
   }
 
   Future<void> setAutoResume(bool val) async {
@@ -203,9 +191,13 @@ class PlayerSettingsNotifier extends StateNotifier<PlayerSettingsState> {
     state = state.copyWith(themeMode: val);
     await _repository.savePlayerSetting('theme_mode', val);
   }
+
+  Future<void> setFocusMode(String val) async {
+    state = state.copyWith(focusMode: val);
+    await _repository.savePlayerSetting('focus_mode', val);
+  }
 }
 
-final playerSettingsProvider =
-    StateNotifierProvider<PlayerSettingsNotifier, PlayerSettingsState>((ref) {
-      return PlayerSettingsNotifier(ref.watch(mediaRepositoryProvider));
-    });
+final playerSettingsProvider = StateNotifierProvider<PlayerSettingsNotifier, PlayerSettingsState>((ref) {
+  return PlayerSettingsNotifier(ref.watch(mediaRepositoryProvider));
+});

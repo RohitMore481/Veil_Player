@@ -1,20 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 import 'core/theme/veil_theme.dart';
-import 'features/main/screens/main_navigation_screen.dart';
+import 'features/main/screens/splash_wrapper.dart';
 import 'features/player/providers/player_settings_provider.dart';
 import 'core/utils/crash_handler.dart';
 import 'core/utils/method_channel_dispatcher.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
+import 'diagnostics/diagnostic_service.dart';
+
+void main() async {
+  final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
   CrashHandler.initialize();
   MethodChannelDispatcher.initialize();
   MediaKit.ensureInitialized();
+  await DiagnosticService.instance.initialize();
 
-  runApp(const ProviderScope(child: VeilApp()));
+  runApp(
+    const ProviderScope(
+      child: VeilApp(),
+    ),
+  );
 }
 
 class VeilApp extends ConsumerWidget {
@@ -52,7 +62,7 @@ class VeilApp extends ConsumerWidget {
         brightness: Brightness.dark,
       ).themeData,
       themeMode: themeMode,
-      home: const MainNavigationScreen(),
+      home: const SplashWrapper(),
     );
   }
 }

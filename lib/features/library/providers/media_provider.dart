@@ -39,13 +39,11 @@ class PermissionNotifier extends StateNotifier<String> {
   Future<void> openSettings() async {
     await _repository.openSettings();
     // Re-check after returning from settings
-    checkPermission();
+    await checkPermission();
   }
 }
 
-final permissionProvider = StateNotifierProvider<PermissionNotifier, String>((
-  ref,
-) {
+final permissionProvider = StateNotifierProvider<PermissionNotifier, String>((ref) {
   return PermissionNotifier(ref.watch(mediaRepositoryProvider));
 });
 
@@ -88,15 +86,25 @@ class PinnedFoldersNotifier extends StateNotifier<List<String>> {
     }
   }
 
+  Future<void> reorder(int oldIndex, int newIndex) async {
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    final updated = List<String>.from(state);
+    final item = updated.removeAt(oldIndex);
+    updated.insert(newIndex, item);
+    state = updated;
+    await _repository.savePlayerSetting(_key, updated.join(','));
+  }
+
   bool isPinned(String path) {
     return state.contains(path);
   }
 }
 
-final pinnedFoldersProvider =
-    StateNotifierProvider<PinnedFoldersNotifier, List<String>>((ref) {
-      return PinnedFoldersNotifier(ref.watch(mediaRepositoryProvider));
-    });
+final pinnedFoldersProvider = StateNotifierProvider<PinnedFoldersNotifier, List<String>>((ref) {
+  return PinnedFoldersNotifier(ref.watch(mediaRepositoryProvider));
+});
 
 // Folders List Provider
 final foldersProvider = FutureProvider<List<FolderItem>>((ref) async {
@@ -105,23 +113,18 @@ final foldersProvider = FutureProvider<List<FolderItem>>((ref) async {
   if (permission != 'granted' && permission != 'partial') {
     return [];
   }
-
+  
   final folders = await ref.watch(mediaRepositoryProvider).getFolders();
   final pinnedPaths = ref.watch(pinnedFoldersProvider);
 
   int getFolderPriority(FolderItem folder) {
-    if (pinnedPaths.contains(folder.path)) {
-      return 0; // Pinned always first
-    }
     final nameLower = folder.name.toLowerCase();
+    if (nameLower.contains('camera') || nameLower.contains('dcim')) return 0;
     if (nameLower.contains('telegram')) return 1;
     if (nameLower.contains('whatsapp')) return 2;
-    if (nameLower.contains('download')) return 3;
-    if (nameLower.contains('camera') || nameLower.contains('dcim')) return 4;
-    if (folder.containsMovies ||
-        nameLower.contains('movie') ||
-        nameLower.contains('film') ||
-        nameLower.contains('cinema')) {
+    if (folder.containsMovies || nameLower.contains('movie') || nameLower.contains('film') || nameLower.contains('cinema')) return 3;
+    if (nameLower.contains('download')) return 4;
+    if (pinnedPaths.contains(folder.path)) {
       return 5;
     }
     return 6;
@@ -132,6 +135,11 @@ final foldersProvider = FutureProvider<List<FolderItem>>((ref) async {
     final prioB = getFolderPriority(b);
     if (prioA != prioB) {
       return prioA.compareTo(prioB);
+    }
+    if (prioA == 5) {
+      final indexA = pinnedPaths.indexOf(a.path);
+      final indexB = pinnedPaths.indexOf(b.path);
+      return indexA.compareTo(indexB);
     }
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
   });
@@ -177,12 +185,9 @@ class PlaybackHistoryNotifier extends StateNotifier<List<PlaybackHistoryItem>> {
   }
 }
 
-final playbackHistoryProvider =
-    StateNotifierProvider<PlaybackHistoryNotifier, List<PlaybackHistoryItem>>((
-      ref,
-    ) {
-      return PlaybackHistoryNotifier(ref.watch(mediaRepositoryProvider));
-    });
+final playbackHistoryProvider = StateNotifierProvider<PlaybackHistoryNotifier, List<PlaybackHistoryItem>>((ref) {
+  return PlaybackHistoryNotifier(ref.watch(mediaRepositoryProvider));
+});
 
 // Paginated Videos State
 class PaginatedVideoState {
@@ -223,18 +228,8 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
   final String? _folderName;
   static const _limit = 50;
 
-  FolderVideosNotifier(
-    this._repository,
-    this._folderName, {
-    required bool hasPermission,
-  }) : super(
-         PaginatedVideoState(
-           videos: [],
-           isLoading: false,
-           hasMore: hasPermission,
-           offset: 0,
-         ),
-       ) {
+  FolderVideosNotifier(this._repository, this._folderName, {required bool hasPermission})
+      : super(PaginatedVideoState(videos: [], isLoading: false, hasMore: hasPermission, offset: 0)) {
     if (hasPermission) {
       loadNextPage();
     }
@@ -250,7 +245,7 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
         folderName: _folderName,
       );
       final mergedVideos = [...state.videos, ...newVideos];
-
+      
       if (_folderName != null) {
         mergedVideos.sort((a, b) => _naturalCompare(a.title, b.title));
       }
@@ -268,14 +263,8 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
 
   int _naturalCompare(String a, String b) {
     final regex = RegExp(r'(\d+)|(\D+)');
-    final matchesA = regex
-        .allMatches(a.toLowerCase())
-        .map((m) => m.group(0)!)
-        .toList();
-    final matchesB = regex
-        .allMatches(b.toLowerCase())
-        .map((m) => m.group(0)!)
-        .toList();
+    final matchesA = regex.allMatches(a.toLowerCase()).map((m) => m.group(0)!).toList();
+    final matchesB = regex.allMatches(b.toLowerCase()).map((m) => m.group(0)!).toList();
 
     for (int i = 0; i < matchesA.length && i < matchesB.length; i++) {
       final matchA = matchesA[i];
@@ -301,43 +290,34 @@ class FolderVideosNotifier extends StateNotifier<PaginatedVideoState> {
   }
 
   Future<void> refresh() async {
-    state = PaginatedVideoState(
-      videos: [],
-      isLoading: false,
-      hasMore: true,
-      offset: 0,
-    );
+    state = PaginatedVideoState(videos: [], isLoading: false, hasMore: true, offset: 0);
     await loadNextPage();
   }
 }
 
 // Family provider to load paginated videos inside a specific folder (or null for all videos)
-final folderVideosProvider =
-    StateNotifierProvider.family<
-      FolderVideosNotifier,
-      PaginatedVideoState,
-      String?
-    >((ref, folderName) {
-      final permission = ref.watch(permissionProvider);
-      final hasPermission = permission == 'granted' || permission == 'partial';
-      return FolderVideosNotifier(
-        ref.watch(mediaRepositoryProvider),
-        folderName,
-        hasPermission: hasPermission,
-      );
-    });
+final folderVideosProvider = StateNotifierProvider.family<FolderVideosNotifier, PaginatedVideoState, String?>(
+  (ref, folderName) {
+    final permission = ref.watch(permissionProvider);
+    final hasPermission = permission == 'granted' || permission == 'partial';
+    return FolderVideosNotifier(
+      ref.watch(mediaRepositoryProvider),
+      folderName,
+      hasPermission: hasPermission,
+    );
+  },
+);
 
 // Lazy Thumbnail Loader Provider
-final videoThumbnailProvider = FutureProvider.autoDispose
-    .family<String?, VideoItem>((ref, video) async {
-      final settings = ref.watch(playerSettingsProvider);
-      if (settings.batterySaverMode) {
-        return null;
-      }
-      if (video.thumbnailPath != null) return video.thumbnailPath;
-      final repository = ref.watch(mediaRepositoryProvider);
-      return repository.getThumbnail(video.id, video.path);
-    });
+final videoThumbnailProvider = FutureProvider.autoDispose.family<String?, VideoItem>((ref, video) async {
+  final settings = ref.watch(playerSettingsProvider);
+  if (settings.batterySaverMode) {
+    return null;
+  }
+  if (video.thumbnailPath != null) return video.thumbnailPath;
+  final repository = ref.watch(mediaRepositoryProvider);
+  return repository.getThumbnail(video.id, video.path);
+});
 
 // Global Search Providers
 final searchQueryProvider = StateProvider<String>((ref) => '');
@@ -373,7 +353,6 @@ class StorageManagerNotifier extends StateNotifier<bool> {
   Future<void> recheck() => _check();
 }
 
-final storageManagerProvider =
-    StateNotifierProvider<StorageManagerNotifier, bool>((ref) {
-      return StorageManagerNotifier(ref.watch(mediaRepositoryProvider));
-    });
+final storageManagerProvider = StateNotifierProvider<StorageManagerNotifier, bool>((ref) {
+  return StorageManagerNotifier(ref.watch(mediaRepositoryProvider));
+});

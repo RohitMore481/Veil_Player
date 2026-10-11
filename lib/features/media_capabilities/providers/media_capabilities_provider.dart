@@ -29,9 +29,7 @@ final codecDetectorProvider = Provider<CodecDetector>((ref) {
 });
 
 /// The [MediaDiagnosticsService] as a Riverpod provider.
-final mediaDiagnosticsServiceProvider = Provider<MediaDiagnosticsService>((
-  ref,
-) {
+final mediaDiagnosticsServiceProvider = Provider<MediaDiagnosticsService>((ref) {
   return MediaDiagnosticsService(
     detector: ref.watch(codecDetectorProvider),
     supportService: ref.watch(formatSupportServiceProvider),
@@ -44,14 +42,10 @@ final mediaDiagnosticsServiceProvider = Provider<MediaDiagnosticsService>((
 ///
 /// Set by [PlayerScreen] after calling [MediaDiagnosticsService.analyze()].
 /// Reset to null when the player closes.
-final currentDiagnosticsProvider = StateProvider<MediaDiagnostics?>(
-  (ref) => null,
-);
+final currentDiagnosticsProvider = StateProvider<MediaDiagnostics?>((ref) => null);
 
 /// Holds the current [PlaybackError] if playback has failed.
 ///
 /// Set by [PlayerScreen] when a playback error is detected.
 /// Reset to null when a new file opens successfully.
-final currentPlaybackErrorProvider = StateProvider<PlaybackError?>(
-  (ref) => null,
-);
+final currentPlaybackErrorProvider = StateProvider<PlaybackError?>((ref) => null);

@@ -28,10 +28,10 @@ class VeilBottomSheet extends StatelessWidget {
       isScrollControlled: true,
       elevation: 0,
       sheetAnimationStyle: AnimationStyle(
-        duration: const Duration(milliseconds: 180),
-        reverseDuration: const Duration(milliseconds: 150),
-        curve: Curves.easeOutQuart,
-        reverseCurve: Curves.easeInQuart,
+        duration: const Duration(milliseconds: 300),
+        reverseDuration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
       ),
       builder: (context) => VeilBottomSheet(
         title: title,
@@ -58,12 +58,7 @@ class VeilBottomSheet extends StatelessWidget {
         color: theme.colorScheme.surface,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         border: Border(
-          top: BorderSide(
-            color: theme.brightness == Brightness.dark
-                ? const Color(0xFF1E1E1E)
-                : const Color(0xFFE5E7EB),
-            width: 1,
-          ),
+          top: BorderSide(color: theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB), width: 1),
         ),
       ),
       child: Column(
@@ -76,9 +71,7 @@ class VeilBottomSheet extends StatelessWidget {
               width: 36,
               height: 4,
               decoration: BoxDecoration(
-                color: theme.brightness == Brightness.dark
-                    ? Colors.white24
-                    : Colors.black12,
+                color: theme.brightness == Brightness.dark ? Colors.white24 : Colors.black12,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -114,17 +107,15 @@ class VeilBottomSheet extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          Divider(
-            color: theme.brightness == Brightness.dark
-                ? const Color(0xFF1E1E1E)
-                : const Color(0xFFE5E7EB),
-            height: 1,
-          ),
+          Divider(color: theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB), height: 1),
           const SizedBox(height: 12),
           Flexible(
             child: SingleChildScrollView(
               physics: const ClampingScrollPhysics(),
-              child: Column(mainAxisSize: MainAxisSize.min, children: children),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: children,
+              ),
             ),
           ),
         ],
@@ -164,9 +155,7 @@ class VeilBottomSheetTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            color: isSelected
-                ? theme.colorScheme.primary.withValues(alpha: 0.06)
-                : Colors.transparent,
+            color: isSelected ? theme.colorScheme.primary.withValues(alpha: 0.06) : Colors.transparent,
           ),
           child: Row(
             children: [
@@ -174,9 +163,7 @@ class VeilBottomSheetTile extends StatelessWidget {
                 Icon(
                   leadingIcon,
                   size: 20,
-                  color: isSelected
-                      ? theme.colorScheme.primary
-                      : theme.textTheme.bodyMedium?.color,
+                  color: isSelected ? theme.colorScheme.primary : theme.textTheme.bodyMedium?.color,
                 ),
                 const SizedBox(width: 12),
               ],
@@ -185,9 +172,7 @@ class VeilBottomSheetTile extends StatelessWidget {
                   title,
                   style: theme.textTheme.bodyLarge?.copyWith(
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    color: isSelected
-                        ? theme.colorScheme.primary
-                        : theme.textTheme.bodyLarge?.color,
+                    color: isSelected ? theme.colorScheme.primary : theme.textTheme.bodyLarge?.color,
                   ),
                 ),
               ),

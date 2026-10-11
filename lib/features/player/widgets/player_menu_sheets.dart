@@ -30,22 +30,21 @@ class PlayerMenuSheets {
         return StatefulBuilder(
           builder: (context, setModalState) {
             final theme = Theme.of(context);
-
+            
             // Categorize tracks
             final List<SubtitleTrack> embeddedTracks = [];
             final List<SubtitleTrack> externalTracks = [];
 
             for (final track in tracks) {
               if (track.id == 'no' || track.id == 'auto') continue;
-
+              
               final titleLower = (track.title ?? '').toLowerCase();
-              final isExternal =
-                  track.id.startsWith('/') ||
-                  track.id.startsWith('file://') ||
-                  track.id.startsWith('content://') ||
-                  titleLower.contains('external') ||
-                  titleLower.contains('cache') ||
-                  track.id.contains('picked_subtitles');
+              final isExternal = track.id.startsWith('/') ||
+                                 track.id.startsWith('file://') ||
+                                 track.id.startsWith('content://') ||
+                                 titleLower.contains('external') ||
+                                 titleLower.contains('cache') ||
+                                 track.id.contains('picked_subtitles');
               if (isExternal) {
                 externalTracks.add(track);
               } else {
@@ -70,20 +69,17 @@ class PlayerMenuSheets {
                   },
                 ),
                 const Divider(height: 1),
-
+                
                 // TRACK SELECTION
                 _buildHeader(theme, 'TRACK SELECTION'),
-
+                
                 // Track: Off
                 _buildTrackTile(
                   theme: theme,
                   title: 'Off',
                   isSelected: currentActiveTrack.id == 'no',
                   onTap: () {
-                    final offTrack = tracks.firstWhere(
-                      (t) => t.id == 'no',
-                      orElse: () => SubtitleTrack.no(),
-                    );
+                    final offTrack = tracks.firstWhere((t) => t.id == 'no', orElse: () => SubtitleTrack.no());
                     onTrackSelected(offTrack);
                     onChanged(settings.copyWith(enabled: false));
                     setModalState(() {
@@ -96,9 +92,7 @@ class PlayerMenuSheets {
                 if (externalTracks.isNotEmpty) ...[
                   _buildSubHeader(theme, 'External Subtitles'),
                   ...externalTracks.map((track) {
-                    final title = track.title != null && track.title!.isNotEmpty
-                        ? track.title!
-                        : 'External Track';
+                    final title = track.title != null && track.title!.isNotEmpty ? track.title! : 'External Track';
                     final isSelected = currentActiveTrack.id == track.id;
                     return _buildTrackTile(
                       theme: theme,
@@ -119,13 +113,8 @@ class PlayerMenuSheets {
                 if (embeddedTracks.isNotEmpty) ...[
                   _buildSubHeader(theme, 'Embedded Subtitles'),
                   ...embeddedTracks.map((track) {
-                    final title = track.title != null && track.title!.isNotEmpty
-                        ? track.title!
-                        : 'Track ${track.id}';
-                    final lang =
-                        track.language != null && track.language!.isNotEmpty
-                        ? ' [${track.language!.toUpperCase()}]'
-                        : '';
+                    final title = track.title != null && track.title!.isNotEmpty ? track.title! : 'Track ${track.id}';
+                    final lang = track.language != null && track.language!.isNotEmpty ? ' [${track.language!.toUpperCase()}]' : '';
                     final isSelected = currentActiveTrack.id == track.id;
                     return _buildTrackTile(
                       theme: theme,
@@ -146,26 +135,15 @@ class PlayerMenuSheets {
                 Center(
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.5),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
+                      side: BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.5)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     ),
-                    icon: Icon(
-                      Icons.folder_open_rounded,
-                      size: 18,
-                      color: theme.colorScheme.primary,
-                    ),
+                    icon: Icon(Icons.folder_open_rounded, size: 18, color: theme.colorScheme.primary),
                     label: Text(
-                      '📂 Browse Device',
+                      '📂 Browse Device', 
                       style: TextStyle(
-                        fontSize: 13,
+                        fontSize: 13, 
                         fontWeight: FontWeight.bold,
                         color: theme.colorScheme.primary,
                       ),
@@ -205,8 +183,8 @@ class PlayerMenuSheets {
       child: Text(
         text,
         style: TextStyle(
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-          fontSize: 12,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.6), 
+          fontSize: 12, 
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -219,22 +197,9 @@ class PlayerMenuSheets {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: isSelected
-              ? const Color(0xFF10B981)
-              : theme.colorScheme.onSurface,
-          fontSize: 14,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      trailing: isSelected
-          ? const Icon(Icons.check, color: Color(0xFF10B981), size: 18)
-          : null,
+    return VeilBottomSheetTile(
+      title: title,
+      isSelected: isSelected,
       onTap: onTap,
     );
   }
@@ -279,13 +244,8 @@ class PlayerMenuSheets {
 
                 _buildHeader(theme, 'TRACK SELECTION'),
                 ...tracks.map((track) {
-                  final title = track.title != null && track.title!.isNotEmpty
-                      ? track.title!
-                      : 'Track ${track.id}';
-                  final lang =
-                      track.language != null && track.language!.isNotEmpty
-                      ? ' [${track.language!.toUpperCase()}]'
-                      : '';
+                  final title = track.title != null && track.title!.isNotEmpty ? track.title! : 'Track ${track.id}';
+                  final lang = track.language != null && track.language!.isNotEmpty ? ' [${track.language!.toUpperCase()}]' : '';
                   final displayName = '$title$lang';
 
                   return _buildTrackTile(
@@ -312,14 +272,7 @@ class PlayerMenuSheets {
     required String activeTimer,
     required ValueChanged<String> onSelected,
   }) {
-    final List<String> timers = [
-      'Off',
-      '15 Minutes',
-      '30 Minutes',
-      '45 Minutes',
-      '60 Minutes',
-      'End of Video',
-    ];
+    final List<String> timers = ['Off', '15 Minutes', '30 Minutes', '45 Minutes', '60 Minutes', 'End of Video'];
 
     VeilBottomSheet.show(
       context: context,
@@ -362,13 +315,10 @@ class PlayerMenuSheets {
     if (folder.isEmpty) folder = 'Storage';
 
     // Build display values — prefer diagnostics, fall back to legacy
-    final resolution =
-        diagnostics?.resolutionString ?? legacyResolution ?? 'Unknown';
+    final resolution = diagnostics?.resolutionString ?? legacyResolution ?? 'Unknown';
     final resolutionLabel = diagnostics?.resolutionLabel;
-    final videoCodec =
-        diagnostics?.videoCodecDisplayName ?? legacyVideoCodec ?? 'Unknown';
-    final audioCodec =
-        diagnostics?.audioCodecDisplayName ?? legacyAudioCodec ?? 'Unknown';
+    final videoCodec = diagnostics?.videoCodecDisplayName ?? legacyVideoCodec ?? 'Unknown';
+    final audioCodec = diagnostics?.audioCodecDisplayName ?? legacyAudioCodec ?? 'Unknown';
     final frameRate = diagnostics?.frameRateString ?? 'Unknown';
     final bitrate = diagnostics?.bitrateString ?? 'Unknown';
     final container = diagnostics?.containerDisplayName ?? 'Unknown';
@@ -398,12 +348,9 @@ class PlayerMenuSheets {
         _buildInfoRow(theme, 'File Size', fileSize),
         _buildInfoRow(theme, 'Duration', duration),
 
-        // ── Container ─────────────────────────────────────────────────────────
-        _buildSectionHeader(theme, 'CONTAINER'),
+        // ── Video Details ───────────────────────────────────────────────────────
+        _buildSectionHeader(theme, 'VIDEO DETAILS'),
         _buildInfoRow(theme, 'Format', container),
-
-        // ── Video ─────────────────────────────────────────────────────────────
-        _buildSectionHeader(theme, 'VIDEO'),
         _buildInfoRowWithBadge(
           theme: theme,
           label: 'Codec',
@@ -413,14 +360,11 @@ class PlayerMenuSheets {
         _buildInfoRow(
           theme,
           'Resolution',
-          resolutionLabel != null
-              ? '$resolution  ($resolutionLabel)'
-              : resolution,
+          resolutionLabel != null ? '$resolution  ($resolutionLabel)' : resolution,
         ),
         _buildInfoRow(theme, 'Aspect Ratio', aspectRatio),
         _buildInfoRow(theme, 'Frame Rate', frameRate),
-        if (pixelFormat != null)
-          _buildInfoRow(theme, 'Pixel Format', pixelFormat),
+        if (pixelFormat != null) _buildInfoRow(theme, 'Pixel Format', pixelFormat),
         _buildInfoRow(theme, 'Bitrate', bitrate),
         _buildInfoRowWithBadge(
           theme: theme,
@@ -441,29 +385,15 @@ class PlayerMenuSheets {
           value: audioCodec,
           badge: audioSupport,
         ),
-        _buildInfoRow(
-          theme,
-          'Tracks',
-          '$audioTracksCount track${audioTracksCount != 1 ? "s" : ""}',
-        ),
-        if (channelLayout != null)
-          _buildInfoRow(theme, 'Channels', channelLayout),
-        if (audioSampleRate != null)
-          _buildInfoRow(theme, 'Sample Rate', audioSampleRate),
+        _buildInfoRow(theme, 'Tracks', '$audioTracksCount track${audioTracksCount != 1 ? "s" : ""}'),
+        if (channelLayout != null) _buildInfoRow(theme, 'Channels', channelLayout),
+        if (audioSampleRate != null) _buildInfoRow(theme, 'Sample Rate', audioSampleRate),
 
         // ── Subtitles ─────────────────────────────────────────────────────────
         _buildSectionHeader(theme, 'SUBTITLES'),
-        _buildInfoRow(
-          theme,
-          'Tracks',
-          '$subtitleTotal track${subtitleTotal != 1 ? "s" : ""}',
-        ),
+        _buildInfoRow(theme, 'Tracks', '$subtitleTotal track${subtitleTotal != 1 ? "s" : ""}'),
         if (externalSubs > 0)
-          _buildInfoRow(
-            theme,
-            'External',
-            '$externalSubs sidecar file${externalSubs != 1 ? "s" : ""} found',
-          ),
+          _buildInfoRow(theme, 'External', '$externalSubs sidecar file${externalSubs != 1 ? "s" : ""} found'),
 
         const SizedBox(height: 8),
       ],
@@ -537,8 +467,8 @@ class PlayerMenuSheets {
             child: Text(
               value,
               style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontSize: 13,
+                color: theme.colorScheme.onSurface, 
+                fontSize: 13, 
                 height: 1.4,
               ),
               softWrap: true,
@@ -551,10 +481,7 @@ class PlayerMenuSheets {
               decoration: BoxDecoration(
                 color: resolvedColor.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(
-                  color: resolvedColor.withValues(alpha: 0.5),
-                  width: 0.8,
-                ),
+                border: Border.all(color: resolvedColor.withValues(alpha: 0.5), width: 0.8),
               ),
               child: Text(
                 resolvedLabel,
@@ -583,8 +510,8 @@ class PlayerMenuSheets {
             child: Text(
               label,
               style: TextStyle(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                fontSize: 13,
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.38), 
+                fontSize: 13, 
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -594,8 +521,8 @@ class PlayerMenuSheets {
             child: Text(
               value,
               style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontSize: 13,
+                color: theme.colorScheme.onSurface, 
+                fontSize: 13, 
                 height: 1.4,
               ),
               softWrap: true,
@@ -611,14 +538,7 @@ class PlayerMenuSheets {
     required String currentRatio,
     required ValueChanged<String> onSelected,
   }) {
-    final List<String> options = [
-      'Fit',
-      'Fill',
-      'Stretch',
-      '16:9',
-      '4:3',
-      'Original',
-    ];
+    final List<String> options = ['Fit', 'Fill', 'Stretch', '16:9', '4:3', 'Original'];
 
     VeilBottomSheet.show(
       context: context,
@@ -638,6 +558,35 @@ class PlayerMenuSheets {
     );
   }
 
+  static void showFocusModeSettings({
+    required BuildContext context,
+    required String currentMode,
+    required ValueChanged<String> onSelected,
+  }) {
+    final Map<String, String> options = {
+      'OFF': 'Off',
+      'ON': 'On (Always Active)',
+      'AUTO': 'Auto (Fullscreen)',
+    };
+
+    VeilBottomSheet.show(
+      context: context,
+      title: 'Focus Mode (Cinema Mode)',
+      subtitle: 'Suppress notification popups & vibrations',
+      children: options.entries.map((entry) {
+        return VeilBottomSheetTile(
+          title: entry.value,
+          leadingIcon: Icons.do_not_disturb_on_rounded,
+          isSelected: entry.key == currentMode,
+          onTap: () async {
+            onSelected(entry.key);
+            Navigator.pop(context);
+          },
+        );
+      }).toList(),
+    );
+  }
+
   static Widget _buildSyncOffsetAdjuster({
     required ThemeData theme,
     required String title,
@@ -645,8 +594,8 @@ class PlayerMenuSheets {
     required ValueChanged<int> onChanged,
   }) {
     final double seconds = currentValueMs / 1000.0;
-    final String label = seconds == 0.0
-        ? '0.0s (In Sync)'
+    final String label = seconds == 0.0 
+        ? '0.0s (In Sync)' 
         : '${seconds > 0.0 ? "+" : ""}${seconds.toStringAsFixed(1)}s';
 
     return StatefulBuilder(
@@ -673,10 +622,7 @@ class PlayerMenuSheets {
                     children: [
                       IconButton(
                         visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          Icons.remove_circle_outline_rounded,
-                          color: theme.colorScheme.onSurface,
-                        ),
+                        icon: Icon(Icons.remove_circle_outline_rounded, color: theme.colorScheme.onSurface),
                         onPressed: () {
                           final newVal = currentValueMs - 100;
                           onChanged(newVal);
@@ -694,10 +640,7 @@ class PlayerMenuSheets {
                       const SizedBox(width: 8),
                       IconButton(
                         visualDensity: VisualDensity.compact,
-                        icon: Icon(
-                          Icons.add_circle_outline_rounded,
-                          color: theme.colorScheme.onSurface,
-                        ),
+                        icon: Icon(Icons.add_circle_outline_rounded, color: theme.colorScheme.onSurface),
                         onPressed: () {
                           final newVal = currentValueMs + 100;
                           onChanged(newVal);
@@ -709,10 +652,7 @@ class PlayerMenuSheets {
                   if (currentValueMs != 0)
                     TextButton(
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
@@ -733,7 +673,7 @@ class PlayerMenuSheets {
             ],
           ),
         );
-      },
+      }
     );
   }
 }

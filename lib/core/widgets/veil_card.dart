@@ -12,7 +12,9 @@ class VeilCard extends StatefulWidget {
   final double aspectRatio;
   final bool isFolder;
   final String? resolution; // e.g. "1080p", "4K"
-  final String? size; // e.g. "1.4 GB"
+  final String? size;       // e.g. "1.4 GB"
+  final bool isWatched;
+  final bool isLastWatched;
 
   const VeilCard({
     super.key,
@@ -27,14 +29,15 @@ class VeilCard extends StatefulWidget {
     this.isFolder = false,
     this.resolution,
     this.size,
+    this.isWatched = true,
+    this.isLastWatched = false,
   });
 
   @override
   State<VeilCard> createState() => _VeilCardState();
 }
 
-class _VeilCardState extends State<VeilCard>
-    with SingleTickerProviderStateMixin {
+class _VeilCardState extends State<VeilCard> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
 
@@ -43,10 +46,10 @@ class _VeilCardState extends State<VeilCard>
     super.initState();
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 120),
+      duration: const Duration(milliseconds: 150),
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.97).animate(
-      CurvedAnimation(parent: _animController, curve: Curves.easeInOut),
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.96).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
     );
   }
 
@@ -64,25 +67,39 @@ class _VeilCardState extends State<VeilCard>
     final List<String> metadataParts = [];
     if (widget.resolution != null) metadataParts.add(widget.resolution!);
     if (widget.size != null) metadataParts.add(widget.size!);
-    final String metadataText = metadataParts.isNotEmpty
-        ? metadataParts.join(' • ')
+    final String metadataText = metadataParts.isNotEmpty 
+        ? metadataParts.join(' • ') 
         : (widget.subtitle ?? '');
     final String accessibilityLabel = widget.isFolder
         ? 'Folder: ${widget.title}'
         : 'Video: ${widget.title}, duration: ${widget.duration}';
 
-    return Semantics(
-      button: true,
-      label: accessibilityLabel,
-      child: GestureDetector(
-        onTapDown: (_) => _animController.forward(),
-        onTapUp: (_) => _animController.reverse(),
-        onTapCancel: () => _animController.reverse(),
-        onTap: widget.onTap,
-        onLongPress: widget.onLongPress,
-        child: RepaintBoundary(
-          child: ScaleTransition(
-            scale: _scaleAnimation,
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      builder: (context, animValue, child) {
+        return Transform.translate(
+          offset: Offset(0, 8 * (1.0 - animValue)),
+          child: Opacity(
+            opacity: animValue,
+            child: child,
+          ),
+        );
+      },
+      child: Semantics(
+        button: true,
+        label: accessibilityLabel,
+        child: GestureDetector(
+          onTapDown: (_) => _animController.forward(),
+          onTapUp: (_) => _animController.reverse(),
+          onTapCancel: () => _animController.reverse(),
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          child: RepaintBoundary(
+            child: ScaleTransition(
+              scale: _scaleAnimation,
+
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -94,11 +111,14 @@ class _VeilCardState extends State<VeilCard>
                       color: theme.cardTheme.color,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: theme.brightness == Brightness.dark
-                            ? const Color(0xFF181818)
-                            : const Color(0xFFE5E7EB),
-                        width: 1,
+                        color: widget.isLastWatched
+                            ? theme.colorScheme.primary.withValues(alpha: 0.6)
+                            : (theme.brightness == Brightness.dark ? const Color(0xFF181818) : const Color(0xFFE5E7EB)),
+                        width: widget.isLastWatched ? 1.5 : 1.0,
                       ),
+                      boxShadow: widget.isLastWatched
+                          ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.15), blurRadius: 8, spreadRadius: 1)]
+                          : null,
                     ),
                     clipBehavior: Clip.antiAlias,
                     child: Stack(
@@ -110,17 +130,56 @@ class _VeilCardState extends State<VeilCard>
                               ? Image.asset(
                                   widget.imagePath!,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      _buildPlaceholder(),
+                                  errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
                                 )
                               : Image.file(
                                   File(widget.imagePath!),
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      _buildPlaceholder(),
+                                  errorBuilder: (context, error, stackTrace) => _buildPlaceholder(),
                                 )
                         else
                           _buildPlaceholder(),
+
+                        // Folder icon overlay
+                        // "Last Played" badge
+                        if (widget.isLastWatched && !widget.isFolder)
+                          Positioned(
+                            top: 6,
+                            left: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(4),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.play_arrow_rounded,
+                                    color: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
+                                    size: 10,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'LAST PLAYED',
+                                    style: TextStyle(
+                                      color: theme.brightness == Brightness.dark ? Colors.black : Colors.white,
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.2,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
 
                         // Folder icon overlay
                         if (widget.isFolder)
@@ -128,10 +187,7 @@ class _VeilCardState extends State<VeilCard>
                             top: 6,
                             left: 6,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 6,
-                                vertical: 4,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                               decoration: BoxDecoration(
                                 color: Colors.black.withValues(alpha: 0.7),
                                 borderRadius: BorderRadius.circular(4),
@@ -144,15 +200,34 @@ class _VeilCardState extends State<VeilCard>
                             ),
                           ),
 
+                        // "New" badge
+                        if (!widget.isWatched && !widget.isLastWatched)
+                          Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'NEW',
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+
                         // Duration overlay
                         Positioned(
                           bottom: 6,
                           right: 6,
                           child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 5,
-                              vertical: 2,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.8),
                               borderRadius: BorderRadius.circular(4),
@@ -193,8 +268,8 @@ class _VeilCardState extends State<VeilCard>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: theme.colorScheme.onSurface,
+                    fontWeight: widget.isLastWatched ? FontWeight.bold : FontWeight.w500,
+                    color: widget.isLastWatched ? theme.colorScheme.primary : theme.colorScheme.onSurface,
                   ),
                 ),
                 if (metadataText.isNotEmpty) ...[
@@ -214,21 +289,18 @@ class _VeilCardState extends State<VeilCard>
           ),
         ),
       ),
+    ),
     );
   }
 
   Widget _buildPlaceholder() {
     final theme = Theme.of(context);
     return Container(
-      color: theme.brightness == Brightness.dark
-          ? const Color(0xFF070707)
-          : const Color(0xFFF3F4F6),
+      color: theme.brightness == Brightness.dark ? const Color(0xFF070707) : const Color(0xFFF3F4F6),
       alignment: Alignment.center,
       child: Icon(
         widget.isFolder ? Icons.folder_open_rounded : Icons.movie_outlined,
-        color: theme.brightness == Brightness.dark
-            ? Colors.white10
-            : Colors.black12,
+        color: theme.brightness == Brightness.dark ? Colors.white10 : Colors.black12,
         size: widget.aspectRatio < 1.0 ? 32 : 40,
       ),
     );

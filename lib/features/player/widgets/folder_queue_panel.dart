@@ -43,9 +43,7 @@ class _FolderQueuePanelState extends ConsumerState<FolderQueuePanel> {
   void didUpdateWidget(FolderQueuePanel oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentVideo?.id != widget.currentVideo?.id) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _scrollToActiveVideo(),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToActiveVideo());
     }
   }
 
@@ -57,16 +55,10 @@ class _FolderQueuePanelState extends ConsumerState<FolderQueuePanel> {
 
   void _scrollToActiveVideo() {
     if (!mounted) return;
-    final activeIndex = widget.videos.indexWhere(
-      (v) =>
-          v.id == widget.currentVideo?.id ||
-          v.path == widget.currentVideo?.path,
-    );
+    final activeIndex = widget.videos.indexWhere((v) => v.id == widget.currentVideo?.id || v.path == widget.currentVideo?.path);
     if (activeIndex != -1 && _scrollController.hasClients) {
-      final double viewportHeight =
-          _scrollController.position.viewportDimension;
-      final double targetOffset =
-          (activeIndex * 68.0) - (viewportHeight / 2) + 34.0;
+      final double viewportHeight = _scrollController.position.viewportDimension;
+      final double targetOffset = (activeIndex * 68.0) - (viewportHeight / 2) + 34.0;
       final maxScroll = _scrollController.position.maxScrollExtent;
       _scrollController.animateTo(
         targetOffset.clamp(0.0, maxScroll),
@@ -117,13 +109,10 @@ class _FolderQueuePanelState extends ConsumerState<FolderQueuePanel> {
               ],
             ),
           ),
-
+          
           // Search Bar
           Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 16.0,
-              vertical: 4.0,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
             child: Container(
               height: 40,
               decoration: BoxDecoration(
@@ -136,23 +125,12 @@ class _FolderQueuePanelState extends ConsumerState<FolderQueuePanel> {
                 style: const TextStyle(color: Colors.white, fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Search videos...',
-                  hintStyle: const TextStyle(
-                    color: Colors.white24,
-                    fontSize: 13,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.search_rounded,
-                    color: Colors.white38,
-                    size: 18,
-                  ),
+                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                  prefixIcon: const Icon(Icons.search_rounded, color: Colors.white38, size: 18),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
                           padding: EdgeInsets.zero,
-                          icon: const Icon(
-                            Icons.clear_rounded,
-                            color: Colors.white38,
-                            size: 16,
-                          ),
+                          icon: const Icon(Icons.clear_rounded, color: Colors.white38, size: 16),
                           onPressed: () => _searchController.clear(),
                         )
                       : null,
@@ -168,55 +146,39 @@ class _FolderQueuePanelState extends ConsumerState<FolderQueuePanel> {
           Expanded(
             child: widget.isLoading
                 ? Center(
-                    child: CircularProgressIndicator(
-                      color: theme.colorScheme.primary,
-                      strokeWidth: 1.5,
-                    ),
+                    child: CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 1.5),
                   )
                 : filteredVideos.isEmpty
-                ? Center(
-                    child: Text(
-                      'No videos found',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: Colors.white38,
-                      ),
-                    ),
-                  )
-                : RepaintBoundary(
-                    child: ListView.builder(
-                      controller: _scrollController,
-                      physics: const BouncingScrollPhysics(),
-                      itemCount: filteredVideos.length,
-                      itemBuilder: (context, index) {
-                        final video = filteredVideos[index];
-                        final originalIndex = widget.videos.indexWhere(
-                          (v) => v.id == video.id || v.path == video.path,
-                        );
-                        final isPlaying =
-                            video.id == widget.currentVideo?.id ||
-                            video.path == widget.currentVideo?.path;
-                        final activeIndex = widget.videos.indexWhere(
-                          (v) =>
-                              v.id == widget.currentVideo?.id ||
-                              v.path == widget.currentVideo?.path,
-                        );
-                        final isCompleted =
-                            originalIndex != -1 &&
-                            activeIndex != -1 &&
-                            originalIndex < activeIndex;
-
-                        return _QueueItem(
-                          video: video,
-                          isPlaying: isPlaying,
-                          isCompleted: isCompleted,
-                          accentColor: theme.colorScheme.primary,
-                          onTap: () {
-                            widget.onVideoSelected(video);
+                    ? Center(
+                        child: Text(
+                          'No videos found',
+                          style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white38),
+                        ),
+                      )
+                    : RepaintBoundary(
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: filteredVideos.length,
+                          itemBuilder: (context, index) {
+                            final video = filteredVideos[index];
+                            final originalIndex = widget.videos.indexWhere((v) => v.id == video.id || v.path == video.path);
+                            final isPlaying = video.id == widget.currentVideo?.id || video.path == widget.currentVideo?.path;
+                            final activeIndex = widget.videos.indexWhere((v) => v.id == widget.currentVideo?.id || v.path == widget.currentVideo?.path);
+                            final isCompleted = originalIndex != -1 && activeIndex != -1 && originalIndex < activeIndex;
+                            
+                            return _QueueItem(
+                              video: video,
+                              isPlaying: isPlaying,
+                              isCompleted: isCompleted,
+                              accentColor: theme.colorScheme.primary,
+                              onTap: () {
+                                widget.onVideoSelected(video);
+                              },
+                            );
                           },
-                        );
-                      },
-                    ),
-                  ),
+                        ),
+                      ),
           ),
         ],
       ),
@@ -256,17 +218,13 @@ class _QueueItem extends ConsumerWidget {
             bottom: 8.0,
           ),
           decoration: BoxDecoration(
-            color: isPlaying
-                ? accentColor.withValues(alpha: 0.05)
-                : Colors.transparent,
+            color: isPlaying ? accentColor.withValues(alpha: 0.05) : Colors.transparent,
             border: Border(
               left: isPlaying
                   ? BorderSide(color: accentColor, width: 3)
                   : BorderSide.none,
               bottom: BorderSide(
-                color: isPlaying
-                    ? accentColor.withValues(alpha: 0.15)
-                    : const Color(0xFF111111),
+                color: isPlaying ? accentColor.withValues(alpha: 0.15) : const Color(0xFF111111),
                 width: 1,
               ),
             ),
@@ -281,9 +239,7 @@ class _QueueItem extends ConsumerWidget {
                     color: const Color(0xFF111111),
                     borderRadius: BorderRadius.circular(4),
                     border: Border.all(
-                      color: isPlaying
-                          ? accentColor.withValues(alpha: 0.3)
-                          : const Color(0xFF1C1C1C),
+                      color: isPlaying ? accentColor.withValues(alpha: 0.3) : const Color(0xFF1C1C1C),
                       width: 1,
                     ),
                   ),
@@ -294,39 +250,24 @@ class _QueueItem extends ConsumerWidget {
                         return Image.file(
                           File(path),
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stack) => const Icon(
-                            Icons.movie_outlined,
-                            color: Colors.white24,
-                            size: 16,
-                          ),
+                          errorBuilder: (context, error, stack) => const Icon(Icons.movie_outlined, color: Colors.white24, size: 16),
                         );
                       }
-                      return const Icon(
-                        Icons.movie_outlined,
-                        color: Colors.white24,
-                        size: 16,
-                      );
+                      return const Icon(Icons.movie_outlined, color: Colors.white24, size: 16);
                     },
                     loading: () => const Center(
                       child: SizedBox(
                         width: 12,
                         height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.0,
-                          color: Colors.white30,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 1.0, color: Colors.white30),
                       ),
                     ),
-                    error: (err, stack) => const Icon(
-                      Icons.movie_outlined,
-                      color: Colors.white24,
-                      size: 16,
-                    ),
+                    error: (err, stack) => const Icon(Icons.movie_outlined, color: Colors.white24, size: 16),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
-
+              
               // Video Title & Size
               Expanded(
                 child: Column(
@@ -334,34 +275,26 @@ class _QueueItem extends ConsumerWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      '${isPlaying ? '▶ ' : ''}${video.title}',
+                      video.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: isPlaying ? accentColor : Colors.white70,
                         fontSize: 13,
-                        fontWeight: isPlaying
-                            ? FontWeight.bold
-                            : FontWeight.normal,
+                        fontWeight: isPlaying ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Row(
                       children: [
                         if (isPlaying) ...[
-                          Icon(
-                            Icons.play_arrow_rounded,
-                            color: accentColor,
-                            size: 12,
-                          ),
+                          Icon(Icons.play_arrow_rounded, color: accentColor, size: 12),
                           const SizedBox(width: 4),
                         ],
                         Text(
                           '${video.formattedDuration} • ${video.formattedSize}',
                           style: TextStyle(
-                            color: isPlaying
-                                ? accentColor.withValues(alpha: 0.7)
-                                : Colors.white38,
+                            color: isPlaying ? accentColor.withValues(alpha: 0.7) : Colors.white38,
                             fontSize: 10,
                           ),
                         ),

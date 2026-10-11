@@ -14,8 +14,7 @@ class DoubleTapRipple extends StatefulWidget {
   State<DoubleTapRipple> createState() => _DoubleTapRippleState();
 }
 
-class _DoubleTapRippleState extends State<DoubleTapRipple>
-    with SingleTickerProviderStateMixin {
+class _DoubleTapRippleState extends State<DoubleTapRipple> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _opacity;
   late Animation<double> _scale;
@@ -34,10 +33,9 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
       TweenSequenceItem(tween: Tween<double>(begin: 0.4, end: 0.0), weight: 30),
     ]).animate(_controller);
 
-    _scale = Tween<double>(
-      begin: 0.8,
-      end: 1.15,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    _scale = Tween<double>(begin: 0.8, end: 1.15).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
 
     _controller.forward().then((_) {
       if (mounted) {
@@ -54,9 +52,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
 
   @override
   Widget build(BuildContext context) {
-    final Alignment alignment = widget.isLeft
-        ? Alignment.centerLeft
-        : Alignment.centerRight;
+    final Alignment alignment = widget.isLeft ? Alignment.centerLeft : Alignment.centerRight;
     final BorderRadius borderRadius = widget.isLeft
         ? const BorderRadius.horizontal(right: Radius.circular(300))
         : const BorderRadius.horizontal(left: Radius.circular(300));
@@ -71,9 +67,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
             width: MediaQuery.of(context).size.width * 0.35,
             height: double.infinity,
             decoration: BoxDecoration(
-              color: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.08),
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
               borderRadius: borderRadius,
             ),
             child: Center(
@@ -81,9 +75,7 @@ class _DoubleTapRippleState extends State<DoubleTapRipple>
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(
-                    widget.isLeft
-                        ? Icons.fast_rewind_rounded
-                        : Icons.fast_forward_rounded,
+                    widget.isLeft ? Icons.fast_rewind_rounded : Icons.fast_forward_rounded,
                     color: Colors.white,
                     size: 36,
                   ),

@@ -17,11 +17,7 @@ class DeleteVideoOp extends PendingOperation {
   final String path;
   final String folderName;
 
-  DeleteVideoOp({
-    required this.id,
-    required this.path,
-    required this.folderName,
-  });
+  DeleteVideoOp({required this.id, required this.path, required this.folderName});
 }
 
 class RenameVideoOp extends PendingOperation {
@@ -30,12 +26,7 @@ class RenameVideoOp extends PendingOperation {
   final String newName;
   final String folderName;
 
-  RenameVideoOp({
-    required this.id,
-    required this.path,
-    required this.newName,
-    required this.folderName,
-  });
+  RenameVideoOp({required this.id, required this.path, required this.newName, required this.folderName});
 }
 
 class DeleteFolderOp extends PendingOperation {
@@ -56,10 +47,68 @@ class BatchDeleteVideoOp extends PendingOperation {
   final List<String> paths;
   final Set<String> folderNames;
 
-  BatchDeleteVideoOp({
+  BatchDeleteVideoOp({required this.ids, required this.paths, required this.folderNames});
+}
+
+class CopyVideoOp extends PendingOperation {
+  final String id;
+  final String path;
+  final String targetFolder;
+  final String targetFolderName;
+  final String sourceFolderName;
+
+  CopyVideoOp({
+    required this.id,
+    required this.path,
+    required this.targetFolder,
+    required this.targetFolderName,
+    required this.sourceFolderName,
+  });
+}
+
+class MoveVideoOp extends PendingOperation {
+  final String id;
+  final String path;
+  final String targetFolder;
+  final String targetFolderName;
+  final String sourceFolderName;
+
+  MoveVideoOp({
+    required this.id,
+    required this.path,
+    required this.targetFolder,
+    required this.targetFolderName,
+    required this.sourceFolderName,
+  });
+}
+
+class BatchCopyVideoOp extends PendingOperation {
+  final List<String> paths;
+  final String targetFolder;
+  final String targetFolderName;
+  final Set<String> sourceFolderNames;
+
+  BatchCopyVideoOp({
+    required this.paths,
+    required this.targetFolder,
+    required this.targetFolderName,
+    required this.sourceFolderNames,
+  });
+}
+
+class BatchMoveVideoOp extends PendingOperation {
+  final List<String> ids;
+  final List<String> paths;
+  final String targetFolder;
+  final String targetFolderName;
+  final Set<String> sourceFolderNames;
+
+  BatchMoveVideoOp({
     required this.ids,
     required this.paths,
-    required this.folderNames,
+    required this.targetFolder,
+    required this.targetFolderName,
+    required this.sourceFolderNames,
   });
 }
 
@@ -72,7 +121,7 @@ class PendingOperationManager {
 
   /// Executes an operation. If SAF permission is required, it automatically requests it,
   /// waits for the user to grant it, and immediately retries the operation.
-  ///
+  /// 
   /// Returns a tuple of (success: bool, message: String).
   Future<(bool, String)> execute(PendingOperation op) async {
     // Check if the operation affects the currently playing video
@@ -83,9 +132,11 @@ class PendingOperationManager {
       isPlayingActive = true;
     } else if (op is RenameVideoOp && activeVideo?.id == op.id) {
       isPlayingActive = true;
-    } else if (op is BatchDeleteVideoOp &&
-        activeVideo != null &&
-        op.ids.contains(activeVideo.id)) {
+    } else if (op is MoveVideoOp && activeVideo?.id == op.id) {
+      isPlayingActive = true;
+    } else if (op is BatchDeleteVideoOp && activeVideo != null && op.ids.contains(activeVideo.id)) {
+      isPlayingActive = true;
+    } else if (op is BatchMoveVideoOp && activeVideo != null && op.ids.contains(activeVideo.id)) {
       isPlayingActive = true;
     }
 
@@ -103,7 +154,7 @@ class PendingOperationManager {
     if (result == FileOpResult.safPermissionRequired) {
       final safPath = _getSafPathForOp(op);
       final granted = await _repo.requestSafPermission(safPath);
-
+      
       if (granted) {
         // Automatically retry after permission granted
         result = await _runOp(op);
@@ -133,8 +184,15 @@ class PendingOperationManager {
     } else if (op is RenameFolderOp) {
       return await _repo.renameFolder(op.path, op.newName);
     } else if (op is BatchDeleteVideoOp) {
-      // We need a batch delete method on the repository
       return await _repo.deleteVideosBatch(op.ids, op.paths);
+    } else if (op is CopyVideoOp) {
+      return await _repo.copyVideo(op.path, op.targetFolder);
+    } else if (op is MoveVideoOp) {
+      return await _repo.moveVideo(op.id, op.path, op.targetFolder);
+    } else if (op is BatchCopyVideoOp) {
+      return await _repo.copyVideosBatch(op.paths, op.targetFolder);
+    } else if (op is BatchMoveVideoOp) {
+      return await _repo.moveVideosBatch(op.ids, op.paths, op.targetFolder);
     }
     return FileOpResult.error;
   }
@@ -145,10 +203,13 @@ class PendingOperationManager {
     if (op is DeleteFolderOp) return op.path;
     if (op is RenameFolderOp) return op.path;
     if (op is BatchDeleteVideoOp) {
-      // Pick the first path's parent as a heuristic, assuming batch is often in same folder
       if (op.paths.isNotEmpty) return Directory(op.paths.first).parent.path;
       return '';
     }
+    if (op is CopyVideoOp) return op.targetFolder;
+    if (op is MoveVideoOp) return op.targetFolder;
+    if (op is BatchCopyVideoOp) return op.targetFolder;
+    if (op is BatchMoveVideoOp) return op.targetFolder;
     return '';
   }
 
@@ -156,29 +217,23 @@ class PendingOperationManager {
     _ref.invalidate(foldersProvider);
     _ref.invalidate(playbackHistoryProvider);
     _ref.invalidate(searchResultsProvider);
-
+    
     if (op is DeleteVideoOp) {
       await _ref.read(playbackHistoryProvider.notifier).clearHistoryItem(op.id);
       _ref.read(folderVideosProvider(op.folderName).notifier).refresh();
     } else if (op is RenameVideoOp) {
       _ref.read(folderVideosProvider(op.folderName).notifier).refresh();
     } else if (op is DeleteFolderOp) {
-      final isPinned = _ref
-          .read(pinnedFoldersProvider.notifier)
-          .isPinned(op.path);
+      final isPinned = _ref.read(pinnedFoldersProvider.notifier).isPinned(op.path);
       if (isPinned) {
         await _ref.read(pinnedFoldersProvider.notifier).togglePin(op.path);
       }
     } else if (op is RenameFolderOp) {
-      final isPinned = _ref
-          .read(pinnedFoldersProvider.notifier)
-          .isPinned(op.path);
+      final isPinned = _ref.read(pinnedFoldersProvider.notifier).isPinned(op.path);
       if (isPinned) {
         final parent = Directory(op.path).parent.path;
         final newPath = '$parent/${op.newName}';
-        await _ref
-            .read(pinnedFoldersProvider.notifier)
-            .updatePinnedFolder(op.path, newPath);
+        await _ref.read(pinnedFoldersProvider.notifier).updatePinnedFolder(op.path, newPath);
       }
     } else if (op is BatchDeleteVideoOp) {
       for (final id in op.ids) {
@@ -186,6 +241,30 @@ class PendingOperationManager {
       }
       for (final folderName in op.folderNames) {
         _ref.read(folderVideosProvider(folderName).notifier).refresh();
+      }
+    } else if (op is CopyVideoOp) {
+      _ref.read(folderVideosProvider(op.targetFolderName).notifier).refresh();
+      if (op.sourceFolderName != op.targetFolderName) {
+        _ref.read(folderVideosProvider(op.sourceFolderName).notifier).refresh();
+      }
+    } else if (op is MoveVideoOp) {
+      _ref.read(folderVideosProvider(op.targetFolderName).notifier).refresh();
+      if (op.sourceFolderName != op.targetFolderName) {
+        _ref.read(folderVideosProvider(op.sourceFolderName).notifier).refresh();
+      }
+    } else if (op is BatchCopyVideoOp) {
+      _ref.read(folderVideosProvider(op.targetFolderName).notifier).refresh();
+      for (final folderName in op.sourceFolderNames) {
+        if (folderName != op.targetFolderName) {
+          _ref.read(folderVideosProvider(folderName).notifier).refresh();
+        }
+      }
+    } else if (op is BatchMoveVideoOp) {
+      _ref.read(folderVideosProvider(op.targetFolderName).notifier).refresh();
+      for (final folderName in op.sourceFolderNames) {
+        if (folderName != op.targetFolderName) {
+          _ref.read(folderVideosProvider(folderName).notifier).refresh();
+        }
       }
     }
   }
@@ -196,6 +275,10 @@ class PendingOperationManager {
     if (op is DeleteFolderOp) return 'Folder deleted';
     if (op is RenameFolderOp) return 'Folder renamed to ${op.newName}';
     if (op is BatchDeleteVideoOp) return '${op.ids.length} videos deleted';
+    if (op is CopyVideoOp) return 'Video copied to ${op.targetFolderName}';
+    if (op is MoveVideoOp) return 'Video moved to ${op.targetFolderName}';
+    if (op is BatchCopyVideoOp) return '${op.paths.length} videos copied to ${op.targetFolderName}';
+    if (op is BatchMoveVideoOp) return '${op.ids.length} videos moved to ${op.targetFolderName}';
     return 'Operation successful';
   }
 }

@@ -5,12 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/widgets/veil_button.dart';
+import '../../../core/widgets/veil_empty_state.dart';
 import '../../../core/utils/page_transitions.dart';
 import '../../folders/screens/folder_browser_screen.dart';
 import '../../player/screens/player_screen.dart';
 import '../models/video_item.dart';
 import '../providers/media_provider.dart';
 import '../widgets/library_bottom_sheets.dart';
+import '../../folders/widgets/manage_pinned_folders_dialog.dart';
+import '../../file_operations/widgets/file_clipboard_bar.dart';
 import 'search_screen.dart';
 
 class LibraryScreen extends ConsumerStatefulWidget {
@@ -20,10 +23,38 @@ class LibraryScreen extends ConsumerStatefulWidget {
   ConsumerState<LibraryScreen> createState() => _LibraryScreenState();
 }
 
-class _LibraryScreenState extends ConsumerState<LibraryScreen>
-    with AutomaticKeepAliveClientMixin {
+class _LibraryScreenState extends ConsumerState<LibraryScreen> with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final perm = ref.read(permissionProvider);
+        if (perm == 'denied') {
+          ref.read(permissionProvider.notifier).requestPermission();
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      ref.read(permissionProvider.notifier).checkPermission();
+      ref.read(storageManagerProvider.notifier).recheck();
+    }
+  }
 
   IconData _getFolderIcon(FolderItem folder, List<String> pinnedPaths) {
     if (pinnedPaths.contains(folder.path)) return Icons.push_pin_rounded;
@@ -31,18 +62,9 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     if (lower.contains('download')) return Icons.download_rounded;
     if (lower.contains('telegram')) return Icons.telegram_rounded;
     if (lower.contains('whatsapp')) return Icons.video_library_rounded;
-    if (folder.containsMovies ||
-        lower.contains('movie') ||
-        lower.contains('film') ||
-        lower.contains('cinema')) {
-      return Icons.movie_rounded;
-    }
-    if (lower.contains('show') || lower.contains('series')) {
-      return Icons.tv_rounded;
-    }
-    if (lower.contains('camera') || lower.contains('dcim')) {
-      return Icons.photo_camera_back_rounded;
-    }
+    if (folder.containsMovies || lower.contains('movie') || lower.contains('film') || lower.contains('cinema')) return Icons.movie_rounded;
+    if (lower.contains('show') || lower.contains('series')) return Icons.tv_rounded;
+    if (lower.contains('camera') || lower.contains('dcim')) return Icons.photo_camera_back_rounded;
     return Icons.folder_rounded;
   }
 
@@ -51,7 +73,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-
+    
     final minStr = minutes.toString().padLeft(2, '0');
     final secStr = seconds.toString().padLeft(2, '0');
 
@@ -85,75 +107,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
       return Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 24.0,
-              vertical: 32.0,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.05),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.shield_outlined,
-                    color: theme.colorScheme.primary,
-                    size: 64,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Access to Media Required',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Veil Player is an offline-first video player. We need permission to discover and play video files stored on your device.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                    height: 1.5,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                if (permission == 'denied')
-                  VeilButton(
-                    label: 'Grant Media Permission',
-                    icon: Icons.key_rounded,
-                    onTap: () {
-                      ref.read(permissionProvider.notifier).requestPermission();
-                    },
-                  )
-                else ...[
-                  VeilButton(
-                    label: 'Open App Settings',
-                    icon: Icons.settings_outlined,
-                    onTap: () {
-                      ref.read(permissionProvider.notifier).openSettings();
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Permissions are permanently denied. Please enable them in system settings to use the player.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: 0.38,
-                      ),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ],
-            ),
+          child: VeilEmptyState(
+            icon: Icons.shield_outlined,
+            title: 'Storage Access Required',
+            description: 'Allow media access to discover and play video files stored on your device.',
+            buttonLabel: permission == 'denied' ? 'Grant Media Permission' : 'Open App Settings',
+            buttonIcon: permission == 'denied' ? Icons.key_rounded : Icons.settings_outlined,
+            onButtonTap: () {
+              if (permission == 'denied') {
+                ref.read(permissionProvider.notifier).requestPermission();
+              } else {
+                ref.read(permissionProvider.notifier).openSettings();
+              }
+            },
           ),
         ),
       );
@@ -167,39 +133,38 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
-        child: CustomScrollView(
+        child: Stack(
+          children: [
+            CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
             // Top Header Bar
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 16.0,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Text(
-                      'VEIL',
-                      style: theme.textTheme.headlineLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2.0,
-                        color: theme.colorScheme.primary,
-                        fontSize: 26,
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4.0), // Nudge right for optical alignment
+                      child: Image.asset(
+                        'assets/images/header_logo.png',
+                        height: 18,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
                       ),
                     ),
                     Row(
                       mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
                         IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                           icon: Icon(
                             Icons.search_rounded,
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.7,
-                            ),
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                             size: 24,
                           ),
                           onPressed: () {
@@ -217,29 +182,19 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                           onTap: isStorageManager
                               ? null
                               : () async {
-                                  await ref
-                                      .read(storageManagerProvider.notifier)
-                                      .request();
+                                  await ref.read(storageManagerProvider.notifier).request();
                                   // Recheck after returning from settings
-                                  await ref
-                                      .read(storageManagerProvider.notifier)
-                                      .recheck();
+                                  await ref.read(storageManagerProvider.notifier).recheck();
                                 },
                           child: Tooltip(
                             message: isStorageManager
                                 ? 'Full storage access granted — silent file operations active'
                                 : 'Tap to enable silent file operations (no system dialogs)',
                             child: Icon(
-                              isStorageManager
-                                  ? Icons.shield_rounded
-                                  : Icons.shield_outlined,
+                              isStorageManager ? Icons.shield_rounded : Icons.shield_outlined,
                               color: isStorageManager
-                                  ? theme.colorScheme.primary.withValues(
-                                      alpha: 0.7,
-                                    )
-                                  : theme.colorScheme.onSurface.withValues(
-                                      alpha: 0.3,
-                                    ),
+                                  ? theme.colorScheme.primary.withValues(alpha: 0.7)
+                                  : theme.colorScheme.onSurface.withValues(alpha: 0.3),
                               size: 20,
                             ),
                           ),
@@ -262,19 +217,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                       await ref.read(storageManagerProvider.notifier).recheck();
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.06,
-                        ),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: theme.colorScheme.primary.withValues(
-                            alpha: 0.2,
-                          ),
+                          color: theme.colorScheme.primary.withValues(alpha: 0.2),
                           width: 1,
                         ),
                       ),
@@ -290,9 +238,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                             child: Text(
                               'Enable silent file operations — tap to grant full storage access',
                               style: TextStyle(
-                                color: theme.colorScheme.primary.withValues(
-                                  alpha: 0.9,
-                                ),
+                                color: theme.colorScheme.primary.withValues(alpha: 0.9),
                                 fontSize: 12,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -300,9 +246,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                           ),
                           Icon(
                             Icons.arrow_forward_ios_rounded,
-                            color: theme.colorScheme.primary.withValues(
-                              alpha: 0.5,
-                            ),
+                            color: theme.colorScheme.primary.withValues(alpha: 0.5),
                             size: 12,
                           ),
                         ],
@@ -315,10 +259,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
             // SECTION 1: Continue Watching Hero
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 8.0,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -326,9 +267,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                       'Continue Watching',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.7,
-                        ),
+                        color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -336,7 +275,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                       Builder(
                         builder: (context) {
                           final latest = history.first;
-
+                          
                           // Extract parent folder name from path
                           String folderName = 'Storage';
                           final normalized = latest.path.replaceAll('\\', '/');
@@ -359,29 +298,23 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                           return _HeroContinueCard(
                             video: videoItem,
                             title: latest.title,
-                            info:
-                                'Resume position • ${_formatDuration(latest.positionMs)}',
+                            info: 'Resume position • ${_formatDuration(latest.positionMs)}',
                             remaining: latest.remainingTime,
                             progress: latest.progress,
+                            positionMs: latest.positionMs,
+                            durationMs: latest.durationMs,
                           );
                         },
                       ),
                     ] else
                       Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 28,
-                          horizontal: 16,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
                         decoration: BoxDecoration(
-                          color: theme.brightness == Brightness.dark
-                              ? const Color(0xFF070707)
-                              : const Color(0xFFF3F4F6),
+                          color: theme.brightness == Brightness.dark ? const Color(0xFF070707) : const Color(0xFFF3F4F6),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: theme.brightness == Brightness.dark
-                                ? const Color(0xFF131313)
-                                : const Color(0xFFE5E7EB),
+                            color: theme.brightness == Brightness.dark ? const Color(0xFF131313) : const Color(0xFFE5E7EB),
                             width: 1,
                           ),
                         ),
@@ -389,18 +322,14 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                           children: [
                             Icon(
                               Icons.play_circle_outline_rounded,
-                              color: theme.colorScheme.onSurface.withValues(
-                                alpha: 0.1,
-                              ),
+                              color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
                               size: 44,
                             ),
                             const SizedBox(height: 10),
                             Text(
                               'Videos you start playing will appear here',
                               style: TextStyle(
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.3,
-                                ),
+                                color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
                                 fontSize: 12,
                               ),
                               textAlign: TextAlign.center,
@@ -416,32 +345,45 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
             // SECTION 2: Quick Access (Folders)
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.only(
-                  top: 24.0,
-                  left: 16.0,
-                  right: 16.0,
-                ),
+                padding: const EdgeInsets.only(top: 24.0, left: 16.0, right: 16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Quick Access',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.onSurface.withValues(
-                          alpha: 0.7,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Quick Access',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                          ),
                         ),
-                      ),
+                        if (ref.watch(pinnedFoldersProvider).isNotEmpty)
+                          GestureDetector(
+                            onTap: () {
+                              showDialog(
+                                context: context,
+                                builder: (context) => const ManagePinnedFoldersDialog(),
+                              );
+                            },
+                            child: Text(
+                              'Manage',
+                              style: TextStyle(
+                                color: theme.colorScheme.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     foldersAsync.when(
                       loading: () => Center(
                         child: Padding(
                           padding: const EdgeInsets.all(16.0),
-                          child: CircularProgressIndicator(
-                            color: theme.colorScheme.primary,
-                            strokeWidth: 1.5,
-                          ),
+                          child: CircularProgressIndicator(color: theme.colorScheme.primary, strokeWidth: 1.5),
                         ),
                       ),
                       error: (err, stack) => Text(
@@ -449,29 +391,49 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
                         style: const TextStyle(color: Colors.redAccent),
                       ),
                       data: (folders) {
-                        if (folders.isEmpty) {
+                        final pinnedPaths = ref.watch(pinnedFoldersProvider);
+                        final history = ref.watch(playbackHistoryProvider);
+                        final lastWatchedVideoPath = history.isNotEmpty ? history.first.path : null;
+
+                        final quickAccessFolders = folders.where((f) {
+                          if (pinnedPaths.contains(f.path)) return true;
+                          final nameLower = f.name.toLowerCase();
+                          return nameLower == 'camera' || 
+                                 nameLower == 'dcim' || 
+                                 nameLower == 'telegram video' || 
+                                 nameLower == 'whatsapp video' || 
+                                 nameLower == 'download' || 
+                                 nameLower == 'downloads' || 
+                                 nameLower == 'movies' || 
+                                 f.containsMovies;
+                        }).toList();
+
+                        if (quickAccessFolders.isEmpty) {
                           return Padding(
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             child: Text(
                               'No folders containing videos detected',
-                              style: TextStyle(
-                                color: theme.colorScheme.onSurface.withValues(
-                                  alpha: 0.38,
-                                ),
-                                fontSize: 13,
-                              ),
+                              style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.38), fontSize: 13),
                             ),
                           );
                         }
-                        final pinnedPaths = ref.watch(pinnedFoldersProvider);
+
+                        // Find the single best-matching folder for the last-watched video
+                        final lastWatchedFolder = FolderItem.findLastWatchedFolder(
+                          quickAccessFolders,
+                          lastWatchedVideoPath,
+                        );
+                        
                         return Wrap(
                           spacing: 8.0,
                           runSpacing: 8.0,
-                          children: folders.map((folder) {
+                          children: quickAccessFolders.map((folder) {
+                            final isLastWatched = folder == lastWatchedFolder;
                             return _QuickAccessChip(
                               folder: folder,
                               icon: _getFolderIcon(folder, pinnedPaths),
                               accentColor: theme.colorScheme.primary,
+                              isLastWatched: isLastWatched,
                             );
                           }).toList(),
                         );
@@ -483,20 +445,32 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen>
             ),
 
             // Spacer clearance at bottom
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            const SliverToBoxAdapter(
+              child: SizedBox(height: 100),
+            ),
           ],
         ),
-      ),
-    );
+        const Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FileClipboardBar(bottomPadding: 80),
+        ),
+      ],
+    ),
+  ),
+);
   }
 }
 
-class _HeroContinueCard extends StatefulWidget {
+class _HeroContinueCard extends ConsumerStatefulWidget {
   final VideoItem video;
   final String title;
   final String info;
   final String remaining;
   final double progress;
+  final int positionMs;
+  final int durationMs;
 
   const _HeroContinueCard({
     required this.video,
@@ -504,14 +478,15 @@ class _HeroContinueCard extends StatefulWidget {
     required this.info,
     required this.remaining,
     required this.progress,
+    required this.positionMs,
+    required this.durationMs,
   });
 
   @override
-  State<_HeroContinueCard> createState() => _HeroContinueCardState();
+  ConsumerState<_HeroContinueCard> createState() => _HeroContinueCardState();
 }
 
-class _HeroContinueCardState extends State<_HeroContinueCard>
-    with SingleTickerProviderStateMixin {
+class _HeroContinueCardState extends ConsumerState<_HeroContinueCard> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
   bool _isHighlighted = false;
@@ -548,8 +523,15 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
         setState(() => _isHighlighted = false);
         Navigator.push(
           context,
-          VeilPageRoute(builder: (_) => PlayerScreen(video: widget.video)),
-        );
+          VeilPageRoute(
+            builder: (_) => PlayerScreen(video: widget.video),
+          ),
+        ).then((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            ref.invalidate(playbackHistoryProvider);
+            ref.invalidate(foldersProvider);
+          });
+        });
       },
       onTapCancel: () {
         _animController.reverse();
@@ -565,16 +547,14 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
               duration: const Duration(milliseconds: 150),
               width: double.infinity,
               decoration: BoxDecoration(
-                color: _isHighlighted
-                    ? theme.cardTheme.color?.withValues(alpha: 0.8)
+                color: _isHighlighted 
+                    ? theme.cardTheme.color?.withValues(alpha: 0.8) 
                     : theme.cardTheme.color,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: _isHighlighted
                       ? theme.colorScheme.primary.withValues(alpha: 0.3)
-                      : (theme.brightness == Brightness.dark
-                            ? const Color(0xFF1E1E1E)
-                            : const Color(0xFFE5E7EB)),
+                      : (theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB)), 
                   width: 1.2,
                 ),
               ),
@@ -585,13 +565,9 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
                     aspectRatio: 16 / 9,
                     child: Consumer(
                       builder: (context, ref, child) {
-                        final thumbnailAsync = ref.watch(
-                          videoThumbnailProvider(widget.video),
-                        );
+                        final thumbnailAsync = ref.watch(videoThumbnailProvider(widget.video));
                         return Container(
-                          color: theme.brightness == Brightness.dark
-                              ? const Color(0xFF070707)
-                              : const Color(0xFFF3F4F6),
+                          color: theme.brightness == Brightness.dark ? const Color(0xFF070707) : const Color(0xFFF3F4F6),
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
@@ -601,21 +577,47 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
                                     return Image.file(
                                       File(path),
                                       fit: BoxFit.cover,
-                                      errorBuilder: (context, error, stack) =>
-                                          const _PlaceholderIcon(),
+                                      errorBuilder: (context, error, stack) => const _PlaceholderIcon(),
                                     );
                                   }
                                   return const _PlaceholderIcon();
                                 },
                                 loading: () => Center(
-                                  child: CircularProgressIndicator(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
-                                    strokeWidth: 1.5,
-                                  ),
+                                  child: CircularProgressIndicator(color: Theme.of(context).colorScheme.primary, strokeWidth: 1.5),
                                 ),
                                 error: (err, stack) => const _PlaceholderIcon(),
+                              ),
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    showContinueWatchingInfoSheet(
+                                      context: context,
+                                      ref: ref,
+                                      video: widget.video,
+                                      positionMs: widget.positionMs,
+                                      durationMs: widget.durationMs,
+                                      progress: widget.progress,
+                                    );
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.6),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.2),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: const Icon(
+                                      Icons.info_outline_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                  ),
+                                ),
                               ),
                               Positioned(
                                 bottom: 0,
@@ -659,9 +661,7 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurface.withValues(
-                                    alpha: 0.6,
-                                  ),
+                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
                                   fontSize: 12,
                                 ),
                               ),
@@ -677,10 +677,14 @@ class _HeroContinueCardState extends State<_HeroContinueCard>
                             Navigator.push(
                               context,
                               VeilPageRoute(
-                                builder: (_) =>
-                                    PlayerScreen(video: widget.video),
+                                builder: (_) => PlayerScreen(video: widget.video),
                               ),
-                            );
+                            ).then((_) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                ref.invalidate(playbackHistoryProvider);
+                                ref.invalidate(foldersProvider);
+                              });
+                            });
                           },
                         ),
                       ],
@@ -716,19 +720,20 @@ class _QuickAccessChip extends ConsumerStatefulWidget {
   final FolderItem folder;
   final IconData icon;
   final Color accentColor;
+  final bool isLastWatched;
 
   const _QuickAccessChip({
     required this.folder,
     required this.icon,
     required this.accentColor,
+    this.isLastWatched = false,
   });
 
   @override
   ConsumerState<_QuickAccessChip> createState() => _QuickAccessChipState();
 }
 
-class _QuickAccessChipState extends ConsumerState<_QuickAccessChip>
-    with SingleTickerProviderStateMixin {
+class _QuickAccessChipState extends ConsumerState<_QuickAccessChip> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
   bool _isPressed = false;
@@ -740,10 +745,9 @@ class _QuickAccessChipState extends ConsumerState<_QuickAccessChip>
       vsync: this,
       duration: const Duration(milliseconds: 100),
     );
-    _scaleAnimation = Tween<double>(
-      begin: 1.0,
-      end: 0.95,
-    ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
+      CurvedAnimation(parent: _animController, curve: Curves.easeOut),
+    );
   }
 
   @override
@@ -767,8 +771,10 @@ class _QuickAccessChipState extends ConsumerState<_QuickAccessChip>
         Navigator.push(
           context,
           VeilPageRoute(
-            builder: (_) =>
-                FolderBrowserScreen(initialFolder: widget.folder.name),
+            builder: (_) => FolderBrowserScreen(
+              initialFolder: widget.folder.name,
+              isQuickAccess: true,
+            ),
           ),
         );
       },
@@ -794,30 +800,37 @@ class _QuickAccessChipState extends ConsumerState<_QuickAccessChip>
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF0A0A0A)
-                  : const Color(0xFFF3F4F6),
+              color: widget.isLastWatched
+                  ? widget.accentColor.withValues(alpha: 0.12)
+                  : (theme.brightness == Brightness.dark ? const Color(0xFF0A0A0A) : const Color(0xFFF3F4F6)),
               border: Border.all(
-                color: _isPressed
-                    ? widget.accentColor.withValues(alpha: 0.3)
-                    : (theme.brightness == Brightness.dark
-                          ? const Color(0xFF161616)
-                          : const Color(0xFFE5E7EB)),
-                width: 1,
+                color: _isPressed 
+                  ? widget.accentColor.withValues(alpha: 0.5) 
+                  : (widget.isLastWatched 
+                      ? widget.accentColor 
+                      : (theme.brightness == Brightness.dark ? const Color(0xFF161616) : const Color(0xFFE5E7EB))),
+                width: widget.isLastWatched ? 1.5 : 1.0,
               ),
               borderRadius: BorderRadius.circular(16),
+              boxShadow: widget.isLastWatched && !_isPressed
+                  ? [BoxShadow(color: widget.accentColor.withValues(alpha: 0.2), blurRadius: 10, spreadRadius: 1)]
+                  : null,
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(widget.icon, color: widget.accentColor, size: 15),
+                Icon(
+                  widget.isLastWatched ? Icons.play_circle_fill_rounded : widget.icon,
+                  color: widget.accentColor,
+                  size: 15,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   widget.folder.name,
                   style: TextStyle(
-                    color: theme.colorScheme.onSurface,
+                    color: widget.isLastWatched ? widget.accentColor : theme.colorScheme.onSurface,
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: widget.isLastWatched ? FontWeight.bold : FontWeight.w600,
                   ),
                 ),
                 const SizedBox(width: 6),
@@ -829,6 +842,24 @@ class _QuickAccessChipState extends ConsumerState<_QuickAccessChip>
                     fontWeight: FontWeight.normal,
                   ),
                 ),
+                if (widget.folder.newVideosCount > 0) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: widget.accentColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '${widget.folder.newVideosCount} New',
+                      style: TextStyle(
+                        color: widget.accentColor,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

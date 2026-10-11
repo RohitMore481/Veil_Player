@@ -52,13 +52,14 @@ class MediaRepository {
     required int durationMs,
     required String title,
     required String path,
-  }) => _mediaService.savePlaybackPosition(
-    id: id,
-    positionMs: positionMs,
-    durationMs: durationMs,
-    title: title,
-    path: path,
-  );
+  }) =>
+      _mediaService.savePlaybackPosition(
+        id: id,
+        positionMs: positionMs,
+        durationMs: durationMs,
+        title: title,
+        path: path,
+      );
 
   Future<List<PlaybackHistoryItem>> getAllPlaybackPositions() async {
     final rawList = await _mediaService.getAllPlaybackPositions();
@@ -74,8 +75,7 @@ class MediaRepository {
 
   Future<double> getBrightness() => _mediaService.getBrightness();
 
-  Future<bool> setBrightness(double brightness) =>
-      _mediaService.setBrightness(brightness);
+  Future<bool> setBrightness(double brightness) => _mediaService.setBrightness(brightness);
 
   Future<Map<dynamic, dynamic>?> getVideoMetadata(String path) =>
       _mediaStoreService.getVideoMetadata(path);
@@ -109,7 +109,8 @@ class MediaRepository {
   Future<bool> requestSafPermission(String path) =>
       _permissionService.requestSafPermission(path);
 
-  Future<bool> isStorageManager() => _permissionService.isStorageManager();
+  Future<bool> isStorageManager() =>
+      _permissionService.isStorageManager();
 
   Future<bool> requestManageStoragePermission() =>
       _permissionService.requestManageStoragePermission();
@@ -120,10 +121,8 @@ class MediaRepository {
   Future<FileOpResult> deleteVideo(String id, String path) =>
       _fileOperationService.deleteVideo(id, path);
 
-  Future<FileOpResult> deleteVideosBatch(
-    List<String> ids,
-    List<String> paths,
-  ) => _fileOperationService.deleteVideosBatch(ids, paths);
+  Future<FileOpResult> deleteVideosBatch(List<String> ids, List<String> paths) =>
+      _fileOperationService.deleteVideosBatch(ids, paths);
 
   Future<FileOpResult> renameFolder(String path, String newName) =>
       _fileOperationService.renameFolder(path, newName);
@@ -131,12 +130,27 @@ class MediaRepository {
   Future<FileOpResult> deleteFolder(String path) =>
       _fileOperationService.deleteFolder(path);
 
-  Future<bool> hideFolder(String path) => _mediaService.hideFolder(path);
+  Future<FileOpResult> copyVideo(String path, String targetFolder) =>
+      _fileOperationService.copyVideo(path, targetFolder);
+
+  Future<FileOpResult> moveVideo(String id, String path, String targetFolder) =>
+      _fileOperationService.moveVideo(id, path, targetFolder);
+
+  Future<FileOpResult> copyVideosBatch(List<String> paths, String targetFolder) =>
+      _fileOperationService.copyVideosBatch(paths, targetFolder);
+
+  Future<FileOpResult> moveVideosBatch(List<String> ids, List<String> paths, String targetFolder) =>
+      _fileOperationService.moveVideosBatch(ids, paths, targetFolder);
+
+  Future<bool> hideFolder(String path) =>
+      _mediaService.hideFolder(path);
 
   Future<bool> refreshFolder(String path) =>
       _mediaStoreService.refreshFolder(path);
 
-  Future<bool> shareVideo(String path) => _mediaStoreService.shareVideo(path);
+  Future<bool> shareVideo(String path) =>
+      _mediaStoreService.shareVideo(path);
 
-  Future<bool> clearThumbnailCache() => _mediaService.clearThumbnailCache();
+  Future<bool> clearThumbnailCache() =>
+      _mediaService.clearThumbnailCache();
 }

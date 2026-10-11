@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/widgets/veil_card.dart';
 import '../../../core/widgets/veil_button.dart';
+import '../../../core/widgets/veil_empty_state.dart';
 import '../../player/screens/player_screen.dart';
 import '../../../core/utils/page_transitions.dart';
 
@@ -81,24 +82,10 @@ class _ContinueWatchingScreenState extends State<ContinueWatchingScreen> {
         ],
       ),
       body: _resumeItems.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.history_toggle_off_rounded,
-                    color: Colors.white24,
-                    size: 72,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No resume history',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.textTheme.labelMedium?.color,
-                    ),
-                  ),
-                ],
-              ),
+          ? const VeilEmptyState(
+              icon: Icons.history_toggle_off_rounded,
+              title: 'No playback history',
+              description: 'Videos you play will automatically record resume progress here.',
             )
           : GridView.builder(
               physics: const BouncingScrollPhysics(),
@@ -115,8 +102,7 @@ class _ContinueWatchingScreenState extends State<ContinueWatchingScreen> {
 
                 return Dismissible(
                   key: Key(item.title),
-                  direction:
-                      DismissDirection.vertical, // swipe vertically to remove
+                  direction: DismissDirection.vertical, // swipe vertically to remove
                   onDismissed: (_) {
                     setState(() {
                       _resumeItems.removeAt(index);
@@ -136,10 +122,7 @@ class _ContinueWatchingScreenState extends State<ContinueWatchingScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: Colors.red,
-                    ),
+                    child: const Icon(Icons.delete_outline_rounded, color: Colors.red),
                   ),
                   child: VeilCard(
                     title: item.title,
@@ -149,7 +132,9 @@ class _ContinueWatchingScreenState extends State<ContinueWatchingScreen> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        VeilPageRoute(builder: (_) => const PlayerScreen()),
+                        VeilPageRoute(
+                          builder: (_) => const PlayerScreen(),
+                        ),
                       );
                     },
                   ),

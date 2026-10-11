@@ -37,12 +37,15 @@ class MediaService {
     String? folderPath,
   }) async {
     try {
-      final List<dynamic>? result = await _channel.invokeMethod('getVideos', {
-        'limit': limit,
-        'offset': offset,
-        'folderName': folderName,
-        'folderPath': folderPath,
-      });
+      final List<dynamic>? result = await _channel.invokeMethod(
+        'getVideos',
+        {
+          'limit': limit,
+          'offset': offset,
+          'folderName': folderName,
+          'folderPath': folderPath,
+        },
+      );
       if (result == null) return [];
       return result.cast<Map<dynamic, dynamic>>();
     } on PlatformException catch (_) {
@@ -62,10 +65,13 @@ class MediaService {
 
   Future<String?> generateThumbnail(String id, String path) async {
     try {
-      final String? result = await _channel.invokeMethod('generateThumbnail', {
-        'id': id,
-        'path': path,
-      });
+      final String? result = await _channel.invokeMethod(
+        'generateThumbnail',
+        {
+          'id': id,
+          'path': path,
+        },
+      );
       return result;
     } on PlatformException catch (_) {
       return null;
@@ -80,13 +86,16 @@ class MediaService {
     required String path,
   }) async {
     try {
-      final bool result = await _channel.invokeMethod('savePlaybackPosition', {
-        'id': id,
-        'position': positionMs,
-        'duration': durationMs,
-        'title': title,
-        'path': path,
-      });
+      final bool result = await _channel.invokeMethod(
+        'savePlaybackPosition',
+        {
+          'id': id,
+          'position': positionMs,
+          'duration': durationMs,
+          'title': title,
+          'path': path,
+        },
+      );
       return result;
     } on PlatformException catch (_) {
       return false;
@@ -97,7 +106,9 @@ class MediaService {
     try {
       final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
         'getPlaybackPosition',
-        {'id': id},
+        {
+          'id': id,
+        },
       );
       return result;
     } on PlatformException catch (_) {
@@ -107,9 +118,7 @@ class MediaService {
 
   Future<List<Map<dynamic, dynamic>>> getAllPlaybackPositions() async {
     try {
-      final List<dynamic>? result = await _channel.invokeMethod(
-        'getAllPlaybackPositions',
-      );
+      final List<dynamic>? result = await _channel.invokeMethod('getAllPlaybackPositions');
       if (result == null) return [];
       return result.cast<Map<dynamic, dynamic>>();
     } on PlatformException catch (_) {
@@ -119,9 +128,12 @@ class MediaService {
 
   Future<bool> clearPlaybackPosition(String id) async {
     try {
-      final bool result = await _channel.invokeMethod('clearPlaybackPosition', {
-        'id': id,
-      });
+      final bool result = await _channel.invokeMethod(
+        'clearPlaybackPosition',
+        {
+          'id': id,
+        },
+      );
       return result;
     } on PlatformException catch (_) {
       return false;
@@ -139,9 +151,7 @@ class MediaService {
 
   Future<bool> setVolume(double volume) async {
     try {
-      final bool result = await _channel.invokeMethod('setVolume', {
-        'volume': volume,
-      });
+      final bool result = await _channel.invokeMethod('setVolume', {'volume': volume});
       return result;
     } on PlatformException catch (_) {
       return false;
@@ -161,14 +171,13 @@ class MediaService {
 
   Future<bool> setBrightness(double brightness) async {
     try {
-      final bool result = await _channel.invokeMethod('setBrightness', {
-        'brightness': brightness,
-      });
+      final bool result = await _channel.invokeMethod('setBrightness', {'brightness': brightness});
       return result;
     } on PlatformException catch (_) {
       return false;
     }
   }
+
 
   Future<bool> savePlayerSetting(String key, dynamic value) async {
     try {
@@ -196,9 +205,7 @@ class MediaService {
 
   Future<Map<String, dynamic>> getAllPlayerSettings() async {
     try {
-      final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
-        'getAllPlayerSettings',
-      );
+      final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getAllPlayerSettings');
       if (result == null) return {};
       return result.cast<String, dynamic>();
     } on PlatformException catch (_) {
@@ -230,17 +237,16 @@ class MediaService {
     }
   }
 
-  Future<bool> setPipEnabled(
-    bool enabled, {
-    int numerator = 16,
-    int denominator = 9,
-  }) async {
+  Future<bool> setPipEnabled(bool enabled, {int numerator = 16, int denominator = 9}) async {
     try {
-      final bool result = await _channel.invokeMethod('setPipEnabled', {
-        'enabled': enabled,
-        'numerator': numerator,
-        'denominator': denominator,
-      });
+      final bool result = await _channel.invokeMethod(
+        'setPipEnabled',
+        {
+          'enabled': enabled,
+          'numerator': numerator,
+          'denominator': denominator,
+        },
+      );
       return result;
     } on PlatformException catch (_) {
       return false;
@@ -260,7 +266,10 @@ class MediaService {
     try {
       final String? result = await _channel.invokeMethod(
         'saveScreenshotToGallery',
-        {'bytes': bytes, 'title': title},
+        {
+          'bytes': bytes,
+          'title': title,
+        },
       );
       return result;
     } on PlatformException catch (_) {
@@ -281,7 +290,9 @@ class MediaService {
     try {
       final List<dynamic>? result = await _channel.invokeMethod(
         'searchVideos',
-        {'query': query},
+        {
+          'query': query,
+        },
       );
       if (result == null) return [];
       return result.cast<Map<dynamic, dynamic>>();
@@ -290,16 +301,21 @@ class MediaService {
     }
   }
 
+
   Future<bool> hideFolder(String path) async {
     try {
-      final bool? result = await _channel.invokeMethod('hideFolder', {
-        'path': path,
-      });
+      final bool? result = await _channel.invokeMethod(
+        'hideFolder',
+        {
+          'path': path,
+        },
+      );
       return result ?? false;
     } on PlatformException catch (_) {
       return false;
     }
   }
+
 
   Future<bool> clearThumbnailCache() async {
     try {
@@ -317,13 +333,42 @@ class MediaService {
     required int durationMs,
   }) async {
     try {
-      final bool? result = await _channel
-          .invokeMethod('updateActiveMediaSession', {
-            'title': title,
-            'isPlaying': isPlaying,
-            'position': positionMs,
-            'duration': durationMs,
-          });
+      final bool? result = await _channel.invokeMethod(
+        'updateActiveMediaSession',
+        {
+          'title': title,
+          'isPlaying': isPlaying,
+          'position': positionMs,
+          'duration': durationMs,
+        },
+      );
+      return result ?? false;
+    } on PlatformException catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> isNotificationPolicyAccessGranted() async {
+    try {
+      final bool? result = await _channel.invokeMethod('isNotificationPolicyAccessGranted');
+      return result ?? false;
+    } on PlatformException catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> openNotificationPolicySettings() async {
+    try {
+      final bool? result = await _channel.invokeMethod('openNotificationPolicySettings');
+      return result ?? false;
+    } on PlatformException catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> setFocusModeEnabled(bool enable) async {
+    try {
+      final bool? result = await _channel.invokeMethod('setFocusModeEnabled', {'enable': enable});
       return result ?? false;
     } on PlatformException catch (_) {
       return false;

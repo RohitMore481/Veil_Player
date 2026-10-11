@@ -1,18 +1,23 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/veil_theme.dart';
 import '../../library/screens/library_screen.dart';
 import '../../folders/screens/folder_browser_screen.dart';
 import '../../settings/screens/settings_screen.dart';
+import '../../settings/screens/diagnostics_screen.dart';
+import '../../library/providers/media_provider.dart';
+import 'package:veil_player/diagnostics/diagnostic_service.dart';
 
-class MainNavigationScreen extends StatefulWidget {
+class MainNavigationScreen extends ConsumerStatefulWidget {
   const MainNavigationScreen({super.key});
 
   @override
-  State<MainNavigationScreen> createState() => _MainNavigationScreenState();
+  ConsumerState<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _MainNavigationScreenState extends State<MainNavigationScreen> {
+class _MainNavigationScreenState extends ConsumerState<MainNavigationScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
   late PageController _pageController;
   late ValueNotifier<double> _pagePositionNotifier;
@@ -26,25 +31,57 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: _currentIndex);
     _pagePositionNotifier = ValueNotifier<double>(_currentIndex.toDouble());
 
     _pageController.addListener(_onPageScroll);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (DiagnosticService.instance.wasPreviousSessionUnexpected && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Veil Player recovered from an unexpected shutdown.'),
+            action: SnackBarAction(
+              label: 'View Report',
+              textColor: Theme.of(context).colorScheme.primary,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (ctx) => const DiagnosticsScreen()),
+                );
+              },
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    });
   }
 
   void _onPageScroll() {
     if (_pageController.hasClients) {
-      _pagePositionNotifier.value =
-          _pageController.page ?? _currentIndex.toDouble();
+      _pagePositionNotifier.value = _pageController.page ?? _currentIndex.toDouble();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pageController.removeListener(_onPageScroll);
     _pageController.dispose();
     _pagePositionNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      ref.read(permissionProvider.notifier).checkPermission();
+      ref.read(storageManagerProvider.notifier).recheck();
+    }
   }
 
   @override
@@ -67,8 +104,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           Positioned.fill(
             child: PageView(
               controller: _pageController,
-              physics:
-                  const BouncingScrollPhysics(), // Premium springy overscroll physics
+              physics: const BouncingScrollPhysics(), // Premium springy overscroll physics
               onPageChanged: (index) {
                 if (_currentIndex != index) {
                   setState(() {
@@ -90,35 +126,26 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(32),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(
-                    sigmaX: 6.0,
-                    sigmaY: 6.0,
-                  ), // Lightweight blur
+                  filter: ImageFilter.blur(sigmaX: 16.0, sigmaY: 16.0), // High quality glass blur
                   child: Container(
                     width: pillWidth,
                     height: 60,
                     decoration: BoxDecoration(
                       color: theme.brightness == Brightness.dark
-                          ? Colors.black.withValues(alpha: 0.75)
-                          : theme.colorScheme.surface.withValues(
-                              alpha: 0.85,
-                            ), // Glass color
+                          ? Colors.black.withValues(alpha: 0.65)
+                          : theme.colorScheme.surface.withValues(alpha: 0.82), // AMOLED glass fill
                       borderRadius: BorderRadius.circular(32),
                       border: Border.all(
                         color: theme.brightness == Brightness.dark
-                            ? const Color(0xFF1E1E1E)
+                            ? Colors.white.withValues(alpha: 0.12)
                             : const Color(0xFFE5E7EB),
-                        width: 1.2,
+                        width: 1.0,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: theme.brightness == Brightness.dark
-                                ? 0.5
-                                : 0.08,
-                          ),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+                          color: Colors.black.withValues(alpha: theme.brightness == Brightness.dark ? 0.45 : 0.08),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
                         ),
                       ],
                     ),
@@ -135,14 +162,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                                 width: itemWidth,
                                 height: 40,
                                 decoration: BoxDecoration(
-                                  color: theme.colorScheme.primary.withValues(
-                                    alpha: 0.08,
-                                  ), // subtle emerald active fill
+                                  color: theme.colorScheme.primary.withValues(alpha: 0.12), // vibrant emerald active fill
                                   borderRadius: BorderRadius.circular(20),
                                   border: Border.all(
-                                    color: theme.colorScheme.primary.withValues(
-                                      alpha: 0.15,
-                                    ),
+                                    color: theme.colorScheme.primary.withValues(alpha: 0.25),
                                     width: 1,
                                   ),
                                 ),
@@ -152,33 +175,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         ),
                         // Tab Item Buttons
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: paddingHorizontal,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: paddingHorizontal),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              _buildNavItem(
-                                0,
-                                Icons.movie_filter_outlined,
-                                Icons.movie_filter,
-                                'Library',
-                                theme,
-                              ),
-                              _buildNavItem(
-                                1,
-                                Icons.folder_open_outlined,
-                                Icons.folder,
-                                'Folders',
-                                theme,
-                              ),
-                              _buildNavItem(
-                                2,
-                                Icons.settings_outlined,
-                                Icons.settings,
-                                'Settings',
-                                theme,
-                              ),
+                              _buildNavItem(0, Icons.movie_filter_outlined, Icons.movie_filter, 'Library', theme),
+                              _buildNavItem(1, Icons.folder_open_outlined, Icons.folder, 'Folders', theme),
+                              _buildNavItem(2, Icons.settings_outlined, Icons.settings, 'Settings', theme),
                             ],
                           ),
                         ),
@@ -211,12 +214,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           label: label,
           accentColor: theme.colorScheme.primary,
           onTap: () {
+            HapticFeedback.selectionClick();
             setState(() {
               _currentIndex = index;
             });
             _pageController.animateToPage(
               index,
-              duration: VeilMotion.standard,
+              duration: VeilMotion.tabTransition,
               curve: VeilMotion.curve,
             );
           },
@@ -247,8 +251,7 @@ class _NavBarTabButton extends StatefulWidget {
   State<_NavBarTabButton> createState() => _NavBarTabButtonState();
 }
 
-class _NavBarTabButtonState extends State<_NavBarTabButton>
-    with SingleTickerProviderStateMixin {
+class _NavBarTabButtonState extends State<_NavBarTabButton> with SingleTickerProviderStateMixin {
   late AnimationController _animController;
   late Animation<double> _scaleAnimation;
 
@@ -259,13 +262,9 @@ class _NavBarTabButtonState extends State<_NavBarTabButton>
       vsync: this,
       duration: VeilMotion.fast,
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: VeilMotion.scaleButton)
-        .animate(
-          CurvedAnimation(
-            parent: _animController,
-            curve: VeilMotion.curveSharp,
-          ),
-        );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: VeilMotion.scaleButton).animate(
+      CurvedAnimation(parent: _animController, curve: VeilMotion.curveSharp),
+    );
   }
 
   @override
@@ -279,9 +278,7 @@ class _NavBarTabButtonState extends State<_NavBarTabButton>
     final theme = Theme.of(context);
     final color = widget.isSelected
         ? widget.accentColor
-        : (theme.brightness == Brightness.dark
-              ? Colors.white38
-              : Colors.black38);
+        : (theme.brightness == Brightness.dark ? Colors.white38 : Colors.black38);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -296,26 +293,34 @@ class _NavBarTabButtonState extends State<_NavBarTabButton>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            AnimatedSwitcher(
-              duration: VeilMotion.fast,
-              transitionBuilder: (child, anim) =>
-                  FadeTransition(opacity: anim, child: child),
-              child: Icon(
-                widget.isSelected ? widget.activeIcon : widget.inactiveIcon,
-                key: ValueKey<bool>(widget.isSelected),
-                color: color,
-                size: 20,
+            AnimatedScale(
+              scale: widget.isSelected ? VeilMotion.scaleTabActive : 1.0,
+              duration: VeilMotion.tabTransition,
+              curve: VeilMotion.curve,
+              child: AnimatedSwitcher(
+                duration: VeilMotion.tabTransition,
+                switchInCurve: VeilMotion.curve,
+                switchOutCurve: VeilMotion.curve,
+                transitionBuilder: (child, anim) => FadeTransition(
+                  opacity: anim,
+                  child: ScaleTransition(scale: anim, child: child),
+                ),
+                child: Icon(
+                  widget.isSelected ? widget.activeIcon : widget.inactiveIcon,
+                  key: ValueKey<bool>(widget.isSelected),
+                  color: color,
+                  size: 20,
+                ),
               ),
             ),
             const SizedBox(height: 3),
             AnimatedDefaultTextStyle(
-              duration: VeilMotion.fast,
+              duration: VeilMotion.tabTransition,
+              curve: VeilMotion.curve,
               style: TextStyle(
                 color: color,
                 fontSize: 10,
-                fontWeight: widget.isSelected
-                    ? FontWeight.w600
-                    : FontWeight.w400,
+                fontWeight: widget.isSelected ? FontWeight.w600 : FontWeight.w400,
                 letterSpacing: 0.1,
               ),
               child: Text(widget.label),
@@ -326,3 +331,4 @@ class _NavBarTabButtonState extends State<_NavBarTabButton>
     );
   }
 }
+

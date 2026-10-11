@@ -23,9 +23,10 @@ class PermissionService {
 
   Future<bool> hasSafPermission(String path) async {
     try {
-      final bool? result = await _channel.invokeMethod('hasSafPermission', {
-        'path': path,
-      });
+      final bool? result = await _channel.invokeMethod(
+        'hasSafPermission',
+        {'path': path},
+      );
       return result ?? false;
     } on PlatformException catch (_) {
       return false;
@@ -34,9 +35,10 @@ class PermissionService {
 
   Future<bool> requestSafPermission(String path) async {
     try {
-      final bool? result = await _channel.invokeMethod('requestSafPermission', {
-        'path': path,
-      });
+      final bool? result = await _channel.invokeMethod(
+        'requestSafPermission',
+        {'path': path},
+      );
       return result ?? false;
     } on PlatformException catch (_) {
       return false;
@@ -45,9 +47,7 @@ class PermissionService {
 
   Future<bool> needsSystemConfirmationForWrite() async {
     try {
-      final bool? result = await _channel.invokeMethod(
-        'needsSystemConfirmationForWrite',
-      );
+      final bool? result = await _channel.invokeMethod('needsSystemConfirmationForWrite');
       return result ?? true;
     } on PlatformException catch (_) {
       return true;
@@ -65,9 +65,7 @@ class PermissionService {
 
   Future<bool> requestManageStoragePermission() async {
     try {
-      final bool? result = await _channel.invokeMethod(
-        'requestManageStoragePermission',
-      );
+      final bool? result = await _channel.invokeMethod('requestManageStoragePermission');
       return result ?? false;
     } on PlatformException catch (_) {
       return false;

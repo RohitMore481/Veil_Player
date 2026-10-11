@@ -3,10 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 final selectionModeProvider = StateProvider<bool>((ref) => false);
 
-final selectedVideosProvider =
-    StateNotifierProvider<SelectedVideosNotifier, Set<String>>((ref) {
-      return SelectedVideosNotifier(ref);
-    });
+final selectedVideosProvider = StateNotifierProvider<SelectedVideosNotifier, Set<String>>((ref) {
+  return SelectedVideosNotifier(ref);
+});
 
 class SelectedVideosNotifier extends StateNotifier<Set<String>> {
   final Ref _ref;

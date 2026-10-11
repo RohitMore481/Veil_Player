@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/widgets/veil_card.dart';
 import '../../../core/widgets/veil_button.dart';
+import '../../../core/widgets/veil_empty_state.dart';
 import '../../player/screens/player_screen.dart';
 import '../../../core/utils/page_transitions.dart';
 import '../providers/media_provider.dart';
@@ -66,10 +67,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           children: [
             // Search Input Header Bar
             Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 8.0,
-                vertical: 8.0,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
               child: Row(
                 children: [
                   VeilButton(
@@ -82,27 +80,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     child: Container(
                       height: 48,
                       decoration: BoxDecoration(
-                        color: theme.brightness == Brightness.dark
-                            ? const Color(0xFF0F0F0F)
-                            : const Color(0xFFF3F4F6),
+                        color: theme.brightness == Brightness.dark ? const Color(0xFF0F0F0F) : const Color(0xFFF3F4F6),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: theme.brightness == Brightness.dark
-                              ? const Color(0xFF1E1E1E)
-                              : const Color(0xFFE5E7EB),
-                          width: 1,
-                        ),
+                        border: Border.all(color: theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB), width: 1),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.search_rounded,
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.3,
-                            ),
-                            size: 20,
-                          ),
+                          Icon(Icons.search_rounded, color: theme.colorScheme.onSurface.withValues(alpha: 0.3), size: 20),
                           const SizedBox(width: 8),
                           Expanded(
                             child: TextField(
@@ -110,18 +95,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               focusNode: _focusNode,
                               onChanged: _onSearchChanged,
                               cursorColor: theme.colorScheme.primary,
-                              style: TextStyle(
-                                color: theme.colorScheme.onSurface,
-                                fontSize: 15,
-                              ),
+                              style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 15),
                               decoration: InputDecoration(
                                 hintText: 'Search videos, folders...',
-                                hintStyle: TextStyle(
-                                  color: theme.colorScheme.onSurface.withValues(
-                                    alpha: 0.3,
-                                  ),
-                                  fontSize: 15,
-                                ),
+                                hintStyle: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.3), fontSize: 15),
                                 border: InputBorder.none,
                                 isDense: true,
                                 contentPadding: EdgeInsets.zero,
@@ -133,13 +110,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               onTap: _clearSearch,
                               child: Padding(
                                 padding: const EdgeInsets.all(4.0),
-                                child: Icon(
-                                  Icons.close_rounded,
-                                  color: theme.colorScheme.onSurface.withValues(
-                                    alpha: 0.5,
-                                  ),
-                                  size: 18,
-                                ),
+                                child: Icon(Icons.close_rounded, color: theme.colorScheme.onSurface.withValues(alpha: 0.5), size: 18),
                               ),
                             ),
                         ],
@@ -151,23 +122,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               ),
             ),
 
-            Divider(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF131313)
-                  : const Color(0xFFE5E7EB),
-              height: 1,
-            ),
+            Divider(color: theme.brightness == Brightness.dark ? const Color(0xFF131313) : const Color(0xFFE5E7EB), height: 1),
 
             // Search Results area
             Expanded(
               child: query.isEmpty
-                  ? _buildEmptyState(theme, 'Type to search local library')
+                  ? const VeilEmptyState(
+                      icon: Icons.search_rounded,
+                      title: 'Search Library',
+                      description: 'Search videos by file name, folder name, or nested path.',
+                    )
                   : searchResultAsync.when(
                       data: (videos) {
                         if (videos.isEmpty) {
-                          return _buildEmptyState(
-                            theme,
-                            'No videos found for "$query"',
+                          return const VeilEmptyState(
+                            icon: Icons.search_off_rounded,
+                            title: 'No matches found',
+                            description: 'Try searching with another keyword or folder name.',
                           );
                         }
 
@@ -175,51 +146,53 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                           physics: const BouncingScrollPhysics(),
                           slivers: [
                             SliverPadding(
-                              padding: const EdgeInsets.only(
-                                left: 16.0,
-                                right: 16.0,
-                                top: 16.0,
-                              ),
+                              padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 16.0),
                               sliver: SliverGrid(
-                                gridDelegate:
-                                    SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: crossAxisCount,
-                                      mainAxisSpacing: 14,
-                                      crossAxisSpacing: 10,
-                                      childAspectRatio: 1.15,
-                                    ),
-                                delegate: SliverChildBuilderDelegate((
-                                  context,
-                                  index,
-                                ) {
-                                  final video = videos[index];
-                                  return Consumer(
-                                    builder: (context, ref, child) {
-                                      final thumbnailAsync = ref.watch(
-                                        videoThumbnailProvider(video),
-                                      );
-                                      return VeilCard(
-                                        title: video.title,
-                                        duration: video.formattedDuration,
-                                        size: video.formattedSize,
-                                        imagePath: thumbnailAsync.value,
-                                        onTap: () {
-                                          Navigator.push(
-                                            context,
-                                            VeilPageRoute(
-                                              builder: (_) =>
-                                                  PlayerScreen(video: video),
-                                            ),
-                                          ).then((_) {
-                                            ref.invalidate(
-                                              playbackHistoryProvider,
-                                            );
-                                          });
-                                        },
-                                      );
-                                    },
-                                  );
-                                }, childCount: videos.length),
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: crossAxisCount,
+                                  mainAxisSpacing: 14,
+                                  crossAxisSpacing: 10,
+                                  childAspectRatio: 1.15,
+                                ),
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    final video = videos[index];
+                                    return Consumer(
+                                      builder: (context, ref, child) {
+                                        final thumbnailAsync = ref.watch(videoThumbnailProvider(video));
+                                        final history = ref.watch(playbackHistoryProvider);
+                                        final lastWatchedItem = history.isNotEmpty ? history.first : null;
+                                        final isLastWatched = lastWatchedItem != null && (
+                                          video.id == lastWatchedItem.id ||
+                                          video.path.replaceAll('\\', '/').toLowerCase() == lastWatchedItem.path.replaceAll('\\', '/').toLowerCase()
+                                        );
+                                        return VeilCard(
+                                          title: video.title,
+                                          duration: video.formattedDuration,
+                                          size: video.formattedSize,
+                                          imagePath: thumbnailAsync.value,
+                                          isWatched: video.isWatched,
+                                          isLastWatched: isLastWatched,
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              VeilPageRoute(
+                                                builder: (_) => PlayerScreen(video: video),
+                                              ),
+                                            ).then((_) {
+                                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                                ref.invalidate(playbackHistoryProvider);
+                                                ref.invalidate(searchResultsProvider);
+                                                ref.invalidate(foldersProvider);
+                                              });
+                                            });
+                                          },
+                                        );
+                                      },
+                                    );
+                                  },
+                                  childCount: videos.length,
+                                ),
                               ),
                             ),
                             const SliverToBoxAdapter(
@@ -237,42 +210,10 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       error: (err, stack) => Center(
                         child: Text(
                           'Error performing search: $err',
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurface.withValues(
-                              alpha: 0.38,
-                            ),
-                            fontSize: 13,
-                          ),
+                          style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.38), fontSize: 13),
                         ),
                       ),
                     ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState(ThemeData theme, String message) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search_off_rounded,
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
-              size: 72,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: TextStyle(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                fontSize: 13,
-              ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),

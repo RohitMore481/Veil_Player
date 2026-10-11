@@ -9,7 +9,7 @@ class FormatSupportService {
   final CodecRegistry _registry;
 
   FormatSupportService({CodecRegistry? registry})
-    : _registry = registry ?? CodecRegistry.instance;
+      : _registry = registry ?? CodecRegistry.instance;
 
   // ── Container queries ──────────────────────────────────────────────────────
 
@@ -39,8 +39,7 @@ class FormatSupportService {
       return CompatibilityReport(
         query: ext,
         supportLevel: SupportLevel.unsupported,
-        message:
-            'Unknown container format ".$ext". '
+        message: 'Unknown container format ".$ext". '
             'Veil may still attempt playback via mpv.',
       );
     }
@@ -58,8 +57,7 @@ class FormatSupportService {
           query: ext,
           supportLevel: SupportLevel.limited,
           container: container,
-          message:
-              '${container.displayName} has limited support — '
+          message: '${container.displayName} has limited support — '
               'some features may not work correctly.',
         );
       case SupportLevel.unsupported:

@@ -22,9 +22,12 @@ import '../widgets/double_tap_ripple.dart';
 import '../widgets/seek_gesture_overlay.dart';
 import '../providers/player_settings_provider.dart';
 import '../widgets/folder_queue_panel.dart';
-import 'package:veil_player/core/utils/crash_handler.dart';
-import 'package:veil_player/core/utils/method_channel_dispatcher.dart';
-import 'package:veil_player/features/player/providers/active_video_provider.dart';
+import '../../../core/utils/crash_handler.dart';
+import '../../../core/utils/method_channel_dispatcher.dart';
+import '../providers/active_video_provider.dart';
+import '../widgets/focus_mode_permission_sheet.dart';
+import '../../../diagnostics/diagnostic_service.dart';
+import '../../../diagnostics/diagnostic_event.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final VideoItem? video;
@@ -34,8 +37,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
   ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends ConsumerState<PlayerScreen>
-    with WidgetsBindingObserver {
+class _PlayerScreenState extends ConsumerState<PlayerScreen> with WidgetsBindingObserver {
   late final Player player;
   late final VideoController controller;
 
@@ -50,7 +52,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool speedBoostActive = false;
   bool isLocked = false;
   bool showQueuePanel = false;
-
+  
   // HUD states for swipe gestures
   double volumeValue = 0.5;
   double brightnessValue = 0.5;
@@ -120,15 +122,180 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   VideoItem? _currentVideo;
   int _activeSubtitleDelayMs = 0;
   int _activeAudioDelayMs = 0;
+  bool _isExiting = false;
+  bool _isFocusModeActive = false;
+  bool _isCleanedUp = false;
+  bool _canPop = false;
+
+  Future<void> _evaluateFocusMode() async {
+    if (!mounted) return;
+    final settings = ref.read(playerSettingsProvider);
+    final mode = settings.focusMode;
+
+    bool shouldBeActive = false;
+    if (mode == 'ON') {
+      shouldBeActive = isPlaying;
+    } else if (mode == 'AUTO') {
+      final size = MediaQuery.of(context).size;
+      final isLandscape = size.width > size.height;
+      shouldBeActive = isPlaying && isLandscape;
+    }
+
+    if (shouldBeActive) {
+      final granted = await MediaService().isNotificationPolicyAccessGranted();
+      if (!granted) {
+        if (_isFocusModeActive) {
+          _isFocusModeActive = false;
+          await MediaService().setFocusModeEnabled(false);
+        }
+        return;
+      }
+      if (!_isFocusModeActive) {
+        _isFocusModeActive = true;
+        await MediaService().setFocusModeEnabled(true);
+        _showHUDNotification('Focus Mode On', Icons.do_not_disturb_on_rounded);
+      }
+    } else {
+      if (_isFocusModeActive) {
+        _isFocusModeActive = false;
+        await MediaService().setFocusModeEnabled(false);
+      }
+    }
+  }
+
+  Future<void> _cleanupPlayer() async {
+    if (_isCleanedUp) return;
+    _isCleanedUp = true;
+
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.info,
+      event: 'Player cleanup started',
+    );
+
+    MethodChannelDispatcher.removeListener(_handleMethodCall);
+
+    positionSub?.cancel();
+    positionSub = null;
+    durationSub?.cancel();
+    durationSub = null;
+    playingSub?.cancel();
+    playingSub = null;
+    completedSub?.cancel();
+    completedSub = null;
+    tracksSub?.cancel();
+    tracksSub = null;
+    errorSub?.cancel();
+    errorSub = null;
+
+    hideTimer?.cancel();
+    hideTimer = null;
+    hudOverlayTimer?.cancel();
+    hudOverlayTimer = null;
+    hudNotificationTimer?.cancel();
+    hudNotificationTimer = null;
+    sleepTimer?.cancel();
+    sleepTimer = null;
+
+    // Guard global state cleanup so a newly opened video session is never disturbed
+    try {
+      final currentActive = ref.read(activeVideoProvider);
+      final thisVideo = _currentVideo ?? widget.video;
+      if (currentActive == null || currentActive.id == thisVideo?.id || currentActive.path == thisVideo?.path) {
+        _updateActiveVideo(null);
+        ref.read(currentDiagnosticsProvider.notifier).state = null;
+        ref.read(currentPlaybackErrorProvider.notifier).state = null;
+        MediaService().setPipEnabled(false);
+        MediaService().abandonAudioFocus();
+        MediaService().updateActiveMediaSession(
+          title: '',
+          isPlaying: false,
+          positionMs: 0,
+          durationMs: 0,
+        );
+      }
+    } catch (_) {}
+
+    if (_isFocusModeActive) {
+      _isFocusModeActive = false;
+      try {
+        MediaService().setFocusModeEnabled(false);
+      } catch (_) {}
+    }
+
+    final p = player;
+    // Detach C++/mpv engine and hardware decoders asynchronously without stalling main isolate
+    unawaited(Future(() async {
+      try {
+        await p.pause();
+      } catch (_) {}
+      try {
+        await p.stop();
+      } catch (_) {}
+      try {
+        await p.dispose();
+      } catch (_) {}
+    }));
+
+    try {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+    } catch (_) {}
+
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.info,
+      event: 'Player cleanup completed',
+    );
+    DiagnosticService.instance.endPlaybackSession(null);
+    DiagnosticService.instance.responsivenessMonitor.setContext('Idle');
+  }
+
+  Future<void> _exitPlayer() async {
+    if (_isExiting) return;
+    _isExiting = true;
+
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.info,
+      event: 'Player exit requested',
+    );
+    DiagnosticService.instance.responsivenessMonitor.setContext('Player exit');
+
+    // Immediately pause playback to guarantee zero overlapping audio
+    try {
+      player.pause();
+    } catch (_) {}
+
+    // Ensure position is saved before route pops so listeners/providers see the updated history immediately
+    try {
+      await _savePosition().timeout(
+        const Duration(milliseconds: 300),
+        onTimeout: () {},
+      );
+    } catch (_) {}
+
+    // Pop the route immediately so UI responds instantaneously to exit gesture / button tap
+    if (mounted) {
+      setState(() {
+        _canPop = true;
+      });
+      Navigator.of(context).pop();
+    }
+
+    // Release native media player resources asynchronously
+    unawaited(Future(() async {
+      await _cleanupPlayer();
+    }));
+  }
 
   void _restoreSavedTracks() {
     if (!mounted || _hasRestoredTracks) return;
 
     final tracks = player.state.tracks;
 
-    if (tracks.audio.isEmpty &&
-        tracks.subtitle.isEmpty &&
-        discoveredSubtitles.isEmpty) {
+    if (tracks.audio.isEmpty && tracks.subtitle.isEmpty && discoveredSubtitles.isEmpty) {
       return;
     }
 
@@ -180,6 +347,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     WidgetsBinding.instance.addObserver(this);
 
     _currentVideo = widget.video;
+    DiagnosticService.instance.startPlaybackSession(_currentVideo?.id);
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.info,
+      event: 'Player initialization started',
+    );
+    DiagnosticService.instance.responsivenessMonitor.setContext('Player');
 
     final settings = ref.read(playerSettingsProvider);
     player = Player();
@@ -188,6 +362,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       configuration: VideoControllerConfiguration(
         enableHardwareAcceleration: settings.hwDecoding,
       ),
+    );
+
+    DiagnosticService.instance.recordEvent(
+      category: DiagnosticCategory.player,
+      severity: DiagnosticSeverity.info,
+      event: 'Player initialized',
     );
 
     _initPlayback();
@@ -222,16 +402,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       });
 
       // Save progress periodically (every 5 seconds)
-      if (isPlaying &&
-          event.inMilliseconds > 0 &&
-          (event.inMilliseconds - lastSavedPositionMs).abs() > 5000) {
+      if (isPlaying && event.inMilliseconds > 0 && (event.inMilliseconds - lastSavedPositionMs).abs() > 5000) {
         _savePosition();
       }
 
       // Check sleep timer if "End of Video"
-      if (activeSleepTimer == 'End of Video' &&
-          duration.inMilliseconds > 0 &&
-          event.inMilliseconds >= duration.inMilliseconds - 200) {
+      if (activeSleepTimer == 'End of Video' && duration.inMilliseconds > 0 && event.inMilliseconds >= duration.inMilliseconds - 200) {
         _onVideoEnded();
       }
     });
@@ -249,6 +425,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       setState(() {
         isPlaying = event;
       });
+      DiagnosticService.instance.recordEvent(
+        category: DiagnosticCategory.player,
+        severity: DiagnosticSeverity.info,
+        event: event ? 'Playback started' : 'Playback paused',
+      );
       if (event) {
         MediaService().requestAudioFocus();
       } else {
@@ -257,14 +438,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         }
       }
       _syncMediaSession();
+      _evaluateFocusMode();
     });
 
     completedSub = player.stream.completed.listen((completed) async {
-      if (!completed ||
-          _isChangingVideo ||
-          player.state.position.inMilliseconds < 1000) {
-        return;
-      }
+      if (!completed || _isChangingVideo || player.state.position.inMilliseconds < 1000) return;
 
       // 1. If sleep timer is set to "End of Video", prioritize ending video
       if (activeSleepTimer == 'End of Video') {
@@ -283,9 +461,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
 
       // 4. Check auto-play next
-      final hasNext =
-          _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
-
+      final hasNext = _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
+      
       if (settings.autoPlayNext) {
         if (hasNext) {
           final nextVideo = _folderVideos[_currentIndex + 1];
@@ -315,6 +492,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // ── Media Capabilities: error detection ───────────────────────────────────
     errorSub = player.stream.error.listen((errorMessage) {
       if (!mounted || errorMessage.isEmpty) return;
+      DiagnosticService.instance.recordEvent(
+        category: DiagnosticCategory.player,
+        severity: DiagnosticSeverity.error,
+        event: 'Playback error: $errorMessage',
+      );
+      unawaited(DiagnosticService.instance.createAnomalyReport(
+        category: 'PLAYER',
+        exceptionMessage: errorMessage,
+      ));
       final diagnosticsService = ref.read(mediaDiagnosticsServiceProvider);
       final error = diagnosticsService.classifyRawError(errorMessage);
       setState(() {
@@ -356,7 +542,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _loadFolderVideos(VideoItem currentVideo) async {
     final stopwatch = Stopwatch()..start();
-
+    
     if (mounted) {
       setState(() {
         _isLoadingFolderVideos = true;
@@ -364,9 +550,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     final path = currentVideo.path;
-    if (path.startsWith('http://') ||
-        path.startsWith('https://') ||
-        path.startsWith('asset://')) {
+    if (path.startsWith('http://') || path.startsWith('https://') || path.startsWith('asset://')) {
       if (mounted) {
         setState(() {
           _folderVideos = [currentVideo];
@@ -382,136 +566,63 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final parentPath = parentDir.path;
 
     try {
-      if (await parentDir.exists()) {
-        final List<FileSystemEntity> entities = [];
-        await for (final entity in parentDir.list(
-          recursive: false,
-          followLinks: false,
-        )) {
-          entities.add(entity);
-        }
+      // Primary: Use MediaStore query to get all videos in the same folder path
+      final mediaStoreVideos = await ref.read(mediaRepositoryProvider).getVideos(
+        limit: 1000,
+        offset: 0,
+        folderPath: parentPath,
+      );
 
-        final supportedExtensions = {
-          'mkv',
-          'mp4',
-          'avi',
-          'mov',
-          'webm',
-          'ts',
-          'mts',
-          'm2ts',
-          'flv',
-          '3gp',
-          '3g2',
-          '3gpp',
-          'ogv',
-          'wmv',
-          'rm',
-          'rmvb',
-          'mpeg',
-          'mpg',
-          'vob',
-          'm4v',
-          'f4v',
-        };
-
-        final List<String> filePaths = [];
-        for (final entity in entities) {
-          if (entity is File) {
-            final name = entity.path.split(RegExp(r'[/\\]')).last;
-            if (name.startsWith('.')) continue; // ignore hidden
-            final ext = name.split('.').last.toLowerCase();
-            // ignore subtitle files explicitly
-            if (ext == 'srt' ||
-                ext == 'vtt' ||
-                ext == 'ass' ||
-                ext == 'ssa' ||
-                ext == 'sub' ||
-                ext == 'idx') {
-              continue;
-            }
-            if (supportedExtensions.contains(ext)) {
-              filePaths.add(entity.path);
-            }
+      if (mediaStoreVideos.isNotEmpty) {
+        resolvedVideos = List.from(mediaStoreVideos);
+      } else {
+        // Fallback: Physical directory listing if MediaStore returns nothing
+        if (await parentDir.exists()) {
+          final List<FileSystemEntity> entities = [];
+          await for (final entity in parentDir.list(recursive: false, followLinks: false)) {
+            entities.add(entity);
           }
-        }
+          
+          final supportedExtensions = {
+            'mkv', 'mp4', 'avi', 'mov', 'webm', 'ts', 'mts', 'm2ts', 
+            'flv', '3gp', '3g2', '3gpp', 'ogv', 'wmv', 'rm', 'rmvb', 
+            'mpeg', 'mpg', 'vob', 'm4v', 'f4v'
+          };
 
-        if (filePaths.isNotEmpty) {
-          // Attempt to map using MediaStore query fallback
-          try {
-            final mediaStoreVideos = await ref
-                .read(mediaRepositoryProvider)
-                .getVideos(limit: 1000, offset: 0, folderPath: parentPath);
-            final mediaMap = {for (var v in mediaStoreVideos) v.path: v};
-            for (final filePath in filePaths) {
-              final existing = mediaMap[filePath];
-              if (existing != null) {
-                resolvedVideos.add(existing);
-              } else {
-                final file = File(filePath);
-                final name = filePath.split(RegExp(r'[/\\]')).last;
-                final exists = await file.exists();
-                final size = exists ? await file.length() : 0;
-                final modified = exists
-                    ? await file.lastModified()
-                    : DateTime.now();
-                resolvedVideos.add(
-                  VideoItem(
-                    id: filePath.hashCode.toString(),
-                    title: name,
-                    path: filePath,
-                    duration: Duration.zero,
-                    size: size,
-                    dateAdded: modified,
-                    folderName: parentPath
-                        .split(RegExp(r'[/\\]'))
-                        .lastWhere(
-                          (s) => s.isNotEmpty,
-                          orElse: () => 'Storage',
-                        ),
-                  ),
-                );
-              }
-            }
-          } catch (_) {
-            // Standard fallback without MediaStore query
-            for (final filePath in filePaths) {
-              final file = File(filePath);
-              final name = filePath.split(RegExp(r'[/\\]')).last;
-              final exists = await file.exists();
-              final size = exists ? await file.length() : 0;
-              final modified = exists
-                  ? await file.lastModified()
-                  : DateTime.now();
-              resolvedVideos.add(
-                VideoItem(
-                  id: filePath.hashCode.toString(),
+          for (final entity in entities) {
+            if (entity is File) {
+              final name = entity.path.split(RegExp(r'[/\\]')).last;
+              if (name.startsWith('.')) continue; // ignore hidden
+              final ext = name.split('.').last.toLowerCase();
+              if (supportedExtensions.contains(ext)) {
+                final size = await entity.length();
+                final modified = await entity.lastModified();
+                resolvedVideos.add(VideoItem(
+                  id: entity.path.hashCode.toString(),
                   title: name,
-                  path: filePath,
+                  path: entity.path,
                   duration: Duration.zero,
                   size: size,
                   dateAdded: modified,
-                  folderName: parentPath
-                      .split(RegExp(r'[/\\]'))
-                      .lastWhere((s) => s.isNotEmpty, orElse: () => 'Storage'),
-                ),
-              );
+                  folderName: parentPath.split(RegExp(r'[/\\]')).lastWhere((s) => s.isNotEmpty, orElse: () => 'Storage'),
+                ));
+              }
             }
           }
         }
       }
     } catch (e) {
-      debugPrint(
-        'Physical folder read failed: $e. Falling back to MediaStore query.',
-      );
+      debugPrint('Physical folder read failed: $e. Falling back to MediaStore query.');
     }
 
     // Fallback if physical listing returned nothing
     if (resolvedVideos.isEmpty) {
       try {
-        final mediaStoreVideos = await ref
-            .read(mediaRepositoryProvider)
-            .getVideos(limit: 1000, offset: 0, folderPath: parentPath);
+        final mediaStoreVideos = await ref.read(mediaRepositoryProvider).getVideos(
+          limit: 1000,
+          offset: 0,
+          folderPath: parentPath,
+        );
         resolvedVideos = mediaStoreVideos;
       } catch (e) {
         debugPrint('MediaStore query fallback failed: $e');
@@ -519,9 +630,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     // Ensure the current video is present
-    final hasCurrent = resolvedVideos.any(
-      (v) => v.path == currentVideo.path || v.id == currentVideo.id,
-    );
+    final hasCurrent = resolvedVideos.any((v) => v.path == currentVideo.path || v.id == currentVideo.id);
     if (!hasCurrent) {
       resolvedVideos.add(currentVideo);
     }
@@ -529,9 +638,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // Sort using natural sorting
     resolvedVideos.sort((a, b) => _naturalCompare(a.title, b.title));
 
-    final index = resolvedVideos.indexWhere(
-      (v) => v.path == currentVideo.path || v.id == currentVideo.id,
-    );
+    final index = resolvedVideos.indexWhere((v) => v.path == currentVideo.path || v.id == currentVideo.id);
 
     stopwatch.stop();
 
@@ -547,14 +654,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // Natural Sort alphanumeric comparison helper
   int _naturalCompare(String a, String b) {
     final regex = RegExp(r'(\d+)|(\D+)');
-    final matchesA = regex
-        .allMatches(a.toLowerCase())
-        .map((m) => m.group(0)!)
-        .toList();
-    final matchesB = regex
-        .allMatches(b.toLowerCase())
-        .map((m) => m.group(0)!)
-        .toList();
+    final matchesA = regex.allMatches(a.toLowerCase()).map((m) => m.group(0)!).toList();
+    final matchesB = regex.allMatches(b.toLowerCase()).map((m) => m.group(0)!).toList();
 
     for (int i = 0; i < matchesA.length && i < matchesB.length; i++) {
       final matchA = matchesA[i];
@@ -579,6 +680,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     return matchesA.length.compareTo(matchesB.length);
   }
 
+  Future<void> _markAsWatched(VideoItem video) async {
+    try {
+      final saved = await MediaService().getPlaybackPosition(video.id);
+      final int initialPos = saved != null ? (saved['position'] as int) : 0;
+      final int initialDur = saved != null ? (saved['duration'] as int) : video.duration.inMilliseconds;
+      await MediaService().savePlaybackPosition(
+        id: video.id,
+        positionMs: initialPos,
+        durationMs: initialDur > 0 ? initialDur : 1,
+        title: video.title,
+        path: video.path,
+      );
+    } catch (e) {
+      debugPrint('Failed to mark video as watched: $e');
+    }
+  }
+
   Future<void> _initPlayback() async {
     _isChangingVideo = true;
     try {
@@ -589,6 +707,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         }
         return;
       }
+      await _markAsWatched(active);
       final subId = await MediaService().getPlayerSetting(
         '${active.id}_subtitle_track_id',
         'string',
@@ -640,9 +759,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (saved != null) {
           final positionMs = saved['position'] as int;
           final durationMs = saved['duration'] as int;
-          if (positionMs > 1000 &&
-              durationMs > 0 &&
-              (positionMs / durationMs) < 0.95) {
+          if (positionMs > 1000 && durationMs > 0 && (positionMs / durationMs) < 0.95) {
             setState(() {
               showResumeDialog = true;
               savedProgressMs = positionMs;
@@ -670,8 +787,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _playNextVideo() {
-    final hasNext =
-        _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
+    final hasNext = _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
     if (hasNext) {
       final nextVideo = _folderVideos[_currentIndex + 1];
       _loadVideo(nextVideo);
@@ -691,34 +807,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     try {
       // 1. Save current position of the active video
       await _savePosition();
+      await _markAsWatched(newVideo);
 
       // Carry over active subtitle and audio tracks
       final subId = player.state.track.subtitle.id;
       final audioId = player.state.track.audio.id;
 
       // 2. Resolve parent directories to see if folder has changed
-      final oldParent =
-          _currentVideo != null &&
-              !_currentVideo!.path.startsWith('http') &&
-              !_currentVideo!.path.startsWith('asset')
+      final oldParent = _currentVideo != null && !_currentVideo!.path.startsWith('http') && !_currentVideo!.path.startsWith('asset')
           ? File(_currentVideo!.path).absolute.parent.path
           : '';
-      final newParent =
-          !newVideo.path.startsWith('http') &&
-              !newVideo.path.startsWith('asset')
+      final newParent = !newVideo.path.startsWith('http') && !newVideo.path.startsWith('asset')
           ? File(newVideo.path).absolute.parent.path
           : '';
-
+      
       _currentVideo = newVideo;
       _updateActiveVideo(newVideo);
 
-      if (oldParent == newParent &&
-          _folderVideos.isNotEmpty &&
-          oldParent.isNotEmpty) {
+      if (oldParent == newParent && _folderVideos.isNotEmpty && oldParent.isNotEmpty) {
         // Same directory, just update _currentIndex instantly!
-        final idx = _folderVideos.indexWhere(
-          (v) => v.path == newVideo.path || v.id == newVideo.id,
-        );
+        final idx = _folderVideos.indexWhere((v) => v.path == newVideo.path || v.id == newVideo.id);
         setState(() {
           _currentIndex = idx != -1 ? idx : 0;
         });
@@ -777,9 +885,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (saved != null) {
           final positionMs = saved['position'] as int;
           final durationMs = saved['duration'] as int;
-          if (positionMs > 1000 &&
-              durationMs > 0 &&
-              (positionMs / durationMs) < 0.95) {
+          if (positionMs > 1000 && durationMs > 0 && (positionMs / durationMs) < 0.95) {
             setState(() {
               showResumeDialog = true;
               savedProgressMs = positionMs;
@@ -796,9 +902,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
-  Future<List<SubtitleTrack>> _discoverSidecarSubtitles(
-    String videoPath,
-  ) async {
+  Future<List<SubtitleTrack>> _discoverSidecarSubtitles(String videoPath) async {
     final List<SubtitleTrack> discovered = [];
     try {
       final file = File(videoPath);
@@ -808,24 +912,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       // Extract filename without extension
       final videoName = file.uri.pathSegments.last;
       final dotIndex = videoName.lastIndexOf('.');
-      final baseName = dotIndex == -1
-          ? videoName
-          : videoName.substring(0, dotIndex);
+      final baseName = dotIndex == -1 ? videoName : videoName.substring(0, dotIndex);
       final baseNameLower = baseName.toLowerCase();
 
       final allowedExtensions = {'.srt', '.vtt', '.ass', '.ssa'};
 
-      await for (final entity in parentDir.list(
-        recursive: false,
-        followLinks: false,
-      )) {
+      await for (final entity in parentDir.list(recursive: false, followLinks: false)) {
         if (entity is File) {
           final path = entity.path;
           // Get clean filename
           final name = entity.uri.pathSegments.last;
           final lastDot = name.lastIndexOf('.');
           if (lastDot == -1) continue;
-
+          
           final ext = name.substring(lastDot).toLowerCase();
           if (!allowedExtensions.contains(ext)) continue;
 
@@ -881,16 +980,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       player.setSubtitleTrack(SubtitleTrack.no());
     }
     try {
-      (player.platform as dynamic).setProperty(
-        'sub-delay',
-        '${_activeSubtitleDelayMs / 1000.0}',
-      );
+      (player.platform as dynamic).setProperty('sub-delay', '${_activeSubtitleDelayMs / 1000.0}');
     } catch (_) {}
     try {
-      (player.platform as dynamic).setProperty(
-        'audio-delay',
-        '${_activeAudioDelayMs / 1000.0}',
-      );
+      (player.platform as dynamic).setProperty('audio-delay', '${_activeAudioDelayMs / 1000.0}');
     } catch (_) {}
   }
 
@@ -898,12 +991,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final active = _activeVideo;
     if (active == null) return;
     final currentPos = position.inMilliseconds;
-    final totalDur = duration.inMilliseconds;
-    if (currentPos > 0 && totalDur > 0) {
-      lastSavedPositionMs = currentPos;
+    final totalDur = duration.inMilliseconds > 0 ? duration.inMilliseconds : active.duration.inMilliseconds;
+    // Always persist progress; even if played for 1 sec or backed out, guarantees it enters recently played
+    final posToSave = currentPos > 0 ? currentPos : (lastSavedPositionMs > 0 ? lastSavedPositionMs : 0);
+    if (totalDur > 0) {
+      lastSavedPositionMs = posToSave;
       await MediaService().savePlaybackPosition(
         id: active.id,
-        positionMs: currentPos,
+        positionMs: posToSave,
         durationMs: totalDur,
         title: active.title,
         path: active.path,
@@ -915,12 +1010,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     hideTimer?.cancel();
     if (isLocked) return;
 
-    hideTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted) return;
-      setState(() {
-        showControls = false;
-      });
-    });
+    hideTimer = Timer(
+      const Duration(seconds: 4),
+      () {
+        if (!mounted) return;
+        setState(() {
+          showControls = false;
+        });
+      },
+    );
   }
 
   void showControlsTemporarily() {
@@ -946,8 +1044,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final clamped = target < Duration.zero
         ? Duration.zero
         : target > duration
-        ? duration
-        : target;
+            ? duration
+            : target;
     await player.seek(clamped);
     _syncMediaSession();
     showControlsTemporarily();
@@ -968,15 +1066,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   // Handle Swipe Gestures for Brightness/Volume
-  void _handleVerticalDragUpdate(
-    DragUpdateDetails details,
-    double screenWidth,
-  ) {
+  void _handleVerticalDragUpdate(DragUpdateDetails details, double screenWidth) {
     if (isLocked) return;
 
     final isLeftHalf = details.localPosition.dx < screenWidth / 2;
     // vertical delta (- means drag up, + means drag down)
-    final delta = -details.primaryDelta! / 250.0;
+    final delta = -details.primaryDelta! / 250.0; 
 
     setState(() {
       if (isLeftHalf) {
@@ -1013,10 +1108,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
   }
 
-  void _handleHorizontalDragUpdate(
-    DragUpdateDetails details,
-    double screenWidth,
-  ) {
+  void _handleHorizontalDragUpdate(DragUpdateDetails details, double screenWidth) {
     if (isLocked || !isDraggingSeek) return;
 
     final deltaPx = details.primaryDelta ?? 0.0;
@@ -1026,9 +1118,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     setState(() {
       dragSecondsAccumulator += deltaPx * secondsPerPixel;
 
-      final targetMs =
-          (position.inMilliseconds + (dragSecondsAccumulator * 1000).toInt())
-              .clamp(0, duration.inMilliseconds);
+      final targetMs = (position.inMilliseconds + (dragSecondsAccumulator * 1000).toInt())
+          .clamp(0, duration.inMilliseconds);
 
       targetSeekPosition = Duration(milliseconds: targetMs);
       seekDeltaSeconds = targetSeekPosition.inSeconds - position.inSeconds;
@@ -1091,8 +1182,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             sleepTimerRemaining = null;
             activeSleepTimer = 'Off';
           } else {
-            sleepTimerRemaining =
-                sleepTimerRemaining! - const Duration(seconds: 1);
+            sleepTimerRemaining = sleepTimerRemaining! - const Duration(seconds: 1);
           }
         });
       });
@@ -1153,20 +1243,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         _showHUDNotification('Screenshot failed', Icons.error_outline_rounded);
         return;
       }
-
+      
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final videoTitle = _activeVideo?.title ?? 'video';
       final cleanTitle = videoTitle.replaceAll(RegExp(r'[^\w\s\-\.]'), '_');
       final fileName = 'Veil_${cleanTitle}_$timestamp';
-
-      final result = await MediaService().saveScreenshotToGallery(
-        bytes,
-        fileName,
-      );
+      
+      final result = await MediaService().saveScreenshotToGallery(bytes, fileName);
       if (result != null) {
         if (mounted) {
           _showHUDNotification('Screenshot Saved', Icons.camera_alt_rounded);
-
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: const Color(0xFF0F0F0F),
@@ -1202,8 +1289,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     String fileSizeStr;
     if (sizeBytes > 1024 * 1024 * 1024) {
-      fileSizeStr =
-          '${(sizeBytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+      fileSizeStr = '${(sizeBytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
     } else if (sizeBytes > 1024 * 1024) {
       fileSizeStr = '${(sizeBytes / (1024 * 1024)).toStringAsFixed(2)} MB';
     } else {
@@ -1235,7 +1321,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // Cache diagnostics globally
     if (mounted) {
       ref.read(currentDiagnosticsProvider.notifier).state = diagnostics;
-      CrashHandler.currentDecoder = diagnostics.hwDecodeDisplayName;
+      CrashHandler.currentDecoder = diagnostics.hwDecodeDisplayName ?? 'Software';
     }
 
     if (!mounted) return;
@@ -1279,10 +1365,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (path != null) {
         final fileUri = 'file://$path';
         final fileName = path.split('/').last;
-
+        
         final externalTrack = SubtitleTrack.uri(fileUri, title: fileName);
         await player.setSubtitleTrack(externalTrack);
-
+        
         setState(() {
           activeSubtitleTrack = externalTrack;
         });
@@ -1295,61 +1381,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           );
         }
 
-        _showHUDNotification(
-          'Loaded Subtitle: $fileName',
-          Icons.subtitles_rounded,
-        );
+        _showHUDNotification('Loaded Subtitle: $fileName', Icons.subtitles_rounded);
       }
     } catch (e) {
-      _showHUDNotification(
-        'Failed to load subtitle',
-        Icons.error_outline_rounded,
-      );
+      _showHUDNotification('Failed to load subtitle', Icons.error_outline_rounded);
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
-      if (!_isInPipMode) {
-        player.pause();
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (_isFocusModeActive) {
+        _isFocusModeActive = false;
+        try {
+          MediaService().setFocusModeEnabled(false);
+        } catch (_) {}
       }
+      if (!_isInPipMode) {
+        try {
+          player.pause();
+        } catch (_) {}
+        _savePosition();
+      }
+    } else if (state == AppLifecycleState.detached) {
+      _cleanupPlayer();
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    if (widget.video != null || _currentVideo != null) {
-      MediaService().setPipEnabled(false);
-    }
-    _savePosition();
-    hideTimer?.cancel();
-    hudOverlayTimer?.cancel();
-    hudNotificationTimer?.cancel();
-    sleepTimer?.cancel();
-
-    positionSub?.cancel();
-    durationSub?.cancel();
-    playingSub?.cancel();
-    completedSub?.cancel();
-    tracksSub?.cancel();
-    errorSub?.cancel();
-
-    // Clear session-scoped media capabilities state
-    try {
-      ref.read(currentDiagnosticsProvider.notifier).state = null;
-      ref.read(currentPlaybackErrorProvider.notifier).state = null;
-    } catch (_) {}
-
-    MethodChannelDispatcher.removeListener(_handleMethodCall);
-    _updateActiveVideo(null);
-
-    player.dispose();
-
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-
+    _cleanupPlayer();
     super.dispose();
   }
 
@@ -1437,14 +1500,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Widget build(BuildContext context) {
     ref.listen<VideoItem?>(activeVideoProvider, (previous, next) {
       if (next == null && mounted && previous != null) {
-        Navigator.of(context).pop();
+        _exitPlayer();
       }
     });
     final theme = Theme.of(context);
     final size = MediaQuery.of(context).size;
-    final maxDuration = duration.inMilliseconds <= 0
-        ? 1.0
-        : duration.inMilliseconds.toDouble();
+    final maxDuration = duration.inMilliseconds <= 0 ? 1.0 : duration.inMilliseconds.toDouble();
 
     final settings = ref.watch(playerSettingsProvider);
     final ratioMode = settings.preferredAspectRatio;
@@ -1474,9 +1535,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         videoFit = BoxFit.fill;
         break;
       case 'Original':
-        if (player.state.width != null &&
-            player.state.height != null &&
-            player.state.height! > 0) {
+        if (player.state.width != null && player.state.height != null && player.state.height! > 0) {
           useCustomAspectRatio = true;
           customRatio = player.state.width! / player.state.height!;
           videoFit = BoxFit.fill;
@@ -1487,9 +1546,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     final subSettings = settings.subtitleSettings;
-    final baseTextColor = Color(
-      int.parse(subSettings.textColor.replaceFirst('#', '0xFF')),
-    );
+    final baseTextColor = Color(int.parse(subSettings.textColor.replaceFirst('#', '0xFF')));
     final finalTextColor = baseTextColor.withValues(alpha: subSettings.opacity);
 
     Color finalBgColor;
@@ -1522,7 +1579,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     if (useCustomAspectRatio) {
       videoWidget = Center(
-        child: AspectRatio(aspectRatio: customRatio, child: videoWidget),
+        child: AspectRatio(
+          aspectRatio: customRatio,
+          child: videoWidget,
+        ),
       );
     }
 
@@ -1534,17 +1594,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (_isInPipMode) {
       return Scaffold(
         backgroundColor: Colors.black,
-        body: Center(child: RepaintBoundary(child: videoWidget)),
+        body: Center(
+          child: RepaintBoundary(
+            child: videoWidget,
+          ),
+        ),
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          // 1. Video Player surface
-          Positioned.fill(child: RepaintBoundary(child: videoWidget)),
+    return PopScope(
+      canPop: _canPop,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _exitPlayer();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        resizeToAvoidBottomInset: false,
+        body: Stack(
+          children: [
+            // 1. Video Player surface
+            Positioned.fill(
+              child: RepaintBoundary(
+                child: videoWidget,
+              ),
+            ),
 
           // 2. Gesture Detector Layer
           Positioned.fill(
@@ -1563,11 +1637,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                   }
                 }
               },
-              onVerticalDragUpdate: (details) =>
-                  _handleVerticalDragUpdate(details, size.width),
+              onVerticalDragUpdate: (details) => _handleVerticalDragUpdate(details, size.width),
               onHorizontalDragStart: _handleHorizontalDragStart,
-              onHorizontalDragUpdate: (details) =>
-                  _handleHorizontalDragUpdate(details, size.width),
+              onHorizontalDragUpdate: (details) => _handleHorizontalDragUpdate(details, size.width),
               onHorizontalDragEnd: _handleHorizontalDragEnd,
               child: Row(
                 children: [
@@ -1599,12 +1671,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                               });
                               seekBy(10);
                             },
-                      onLongPressStart: isLocked
-                          ? null
-                          : (_) => enableSpeedBoost(),
-                      onLongPressEnd: isLocked
-                          ? null
-                          : (_) => disableSpeedBoost(),
+                      onLongPressStart: isLocked ? null : (_) => enableSpeedBoost(),
+                      onLongPressEnd: isLocked ? null : (_) => disableSpeedBoost(),
                     ),
                   ),
                 ],
@@ -1616,14 +1684,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           if (showDoubleTapRippleLeft)
             DoubleTapRipple(
               isLeft: true,
-              onCompleted: () =>
-                  setState(() => showDoubleTapRippleLeft = false),
+              onCompleted: () => setState(() => showDoubleTapRippleLeft = false),
             ),
           if (showDoubleTapRippleRight)
             DoubleTapRipple(
               isLeft: false,
-              onCompleted: () =>
-                  setState(() => showDoubleTapRippleRight = false),
+              onCompleted: () => setState(() => showDoubleTapRippleRight = false),
             ),
 
           // 4. Horizontal Seek Gesture HUD
@@ -1668,31 +1734,25 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             Positioned(
               right: 24,
               top: size.height / 2 - 90,
-              child: BrightnessVolumeOverlay(
-                isVolume: true,
-                value: volumeValue,
-              ),
+              child: BrightnessVolumeOverlay(isVolume: true, value: volumeValue),
             ),
           if (showBrightnessHUD)
             Positioned(
               left: 24,
               top: size.height / 2 - 90,
-              child: BrightnessVolumeOverlay(
-                isVolume: false,
-                value: brightnessValue,
-              ),
+              child: BrightnessVolumeOverlay(isVolume: false, value: brightnessValue),
             ),
 
-          if (speedBoostActive) const Center(child: SpeedOverlay()),
+          if (speedBoostActive)
+            const Center(
+              child: SpeedOverlay(),
+            ),
 
           // 7. General HUD notifications (Aspect ratio / Orientation changes)
           if (hudNotificationText != null)
             Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.black87,
                   borderRadius: BorderRadius.circular(12),
@@ -1701,11 +1761,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      hudNotificationIcon,
-                      color: theme.colorScheme.primary,
-                      size: 24,
-                    ),
+                    Icon(hudNotificationIcon, color: theme.colorScheme.primary, size: 24),
                     const SizedBox(width: 8),
                     Text(
                       hudNotificationText!,
@@ -1736,15 +1792,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     decoration: BoxDecoration(
                       color: const Color(0xFF1A0A0A),
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: const Color(0xFFEF4444).withValues(alpha: 0.6),
-                        width: 1,
-                      ),
+                      border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.6), width: 1),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(
-                            0xFFEF4444,
-                          ).withValues(alpha: 0.15),
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.15),
                           blurRadius: 20,
                           spreadRadius: 2,
                         ),
@@ -1756,9 +1807,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(
-                              0xFFEF4444,
-                            ).withValues(alpha: 0.15),
+                            color: const Color(0xFFEF4444).withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Icon(
@@ -1804,15 +1853,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           ),
                         ),
                         GestureDetector(
-                          onTap: () =>
-                              setState(() => _showPlaybackError = false),
+                          onTap: () => setState(() => _showPlaybackError = false),
                           child: const Padding(
                             padding: EdgeInsets.all(4.0),
-                            child: Icon(
-                              Icons.close_rounded,
-                              color: Colors.white38,
-                              size: 18,
-                            ),
+                            child: Icon(Icons.close_rounded, color: Colors.white38, size: 18),
                           ),
                         ),
                       ],
@@ -1827,27 +1871,31 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             top: 0,
             left: 0,
             right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: (showControls && !isLocked) ? 1.0 : 0.0,
-              curve: Curves.easeInOut,
-              child: IgnorePointer(
-                ignoring: !(showControls && !isLocked),
+            child: AnimatedScale(
+              scale: (showControls && !isLocked) ? 1.0 : 0.98,
+              duration: Duration(milliseconds: (showControls && !isLocked) ? 250 : 200),
+              curve: (showControls && !isLocked) ? Curves.easeOutCubic : Curves.easeInCubic,
+              child: AnimatedOpacity(
+                duration: Duration(milliseconds: (showControls && !isLocked) ? 250 : 200),
+                opacity: (showControls && !isLocked) ? 1.0 : 0.0,
+                curve: (showControls && !isLocked) ? Curves.easeOutCubic : Curves.easeInCubic,
+                child: IgnorePointer(
+                  ignoring: !(showControls && !isLocked),
                 child: Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Colors.black87, Colors.transparent],
+                      colors: [
+                        Colors.black87,
+                        Colors.transparent,
+                      ],
                     ),
                   ),
                   child: SafeArea(
                     bottom: false,
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16.0,
-                        vertical: 8.0,
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1855,7 +1903,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                             type: VeilButtonType.icon,
                             icon: Icons.arrow_back_ios_new_rounded,
                             iconColor: Colors.white,
-                            onTap: () => Navigator.pop(context),
+                            onTap: () => _exitPlayer(),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
@@ -1867,41 +1915,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                 children: [
                                   if (sleepTimerRemaining != null)
                                     Padding(
-                                      padding: const EdgeInsets.only(
-                                        right: 8.0,
-                                      ),
+                                      padding: const EdgeInsets.only(right: 8.0),
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: theme.colorScheme.primary
-                                              .withValues(alpha: 0.2),
-                                          borderRadius: BorderRadius.circular(
-                                            8,
-                                          ),
-                                          border: Border.all(
-                                            color: theme.colorScheme.primary,
-                                            width: 1,
-                                          ),
+                                          color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: theme.colorScheme.primary, width: 1),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(
-                                              Icons.timer_rounded,
-                                              color: theme.colorScheme.primary,
-                                              size: 12,
-                                            ),
+                                            Icon(Icons.timer_rounded, color: theme.colorScheme.primary, size: 12),
                                             const SizedBox(width: 4),
                                             Text(
-                                              formatSleepTimer(
-                                                sleepTimerRemaining,
-                                              ),
+                                              formatSleepTimer(sleepTimerRemaining),
                                               style: TextStyle(
-                                                color:
-                                                    theme.colorScheme.primary,
+                                                color: theme.colorScheme.primary,
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
                                               ),
@@ -1915,8 +1945,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     icon: Icons.subtitles_rounded,
                                     iconColor: Colors.white,
                                     onTap: () {
-                                      final uniqueTracks =
-                                          <String, SubtitleTrack>{};
+                                      final uniqueTracks = <String, SubtitleTrack>{};
                                       for (final track in subtitleTracks) {
                                         uniqueTracks[track.id] = track;
                                       }
@@ -1928,17 +1957,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                         context: context,
                                         settings: settings.subtitleSettings,
                                         tracks: uniqueTracks.values.toList(),
-                                        activeTrack:
-                                            player.state.track.subtitle,
+                                        activeTrack: player.state.track.subtitle,
                                         currentDelayMs: _activeSubtitleDelayMs,
                                         onChanged: (newSettings) {
-                                          ref
-                                              .read(
-                                                playerSettingsProvider.notifier,
-                                              )
-                                              .updateSubtitleSettings(
-                                                newSettings,
-                                              );
+                                          ref.read(playerSettingsProvider.notifier).updateSubtitleSettings(newSettings);
                                         },
                                         onTrackSelected: (track) {
                                           player.setSubtitleTrack(track);
@@ -1958,11 +1980,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                             _activeSubtitleDelayMs = delay;
                                           });
                                           try {
-                                            (player.platform as dynamic)
-                                                .setProperty(
-                                                  'sub-delay',
-                                                  '${delay / 1000.0}',
-                                                );
+                                            (player.platform as dynamic).setProperty('sub-delay', '${delay / 1000.0}');
                                           } catch (_) {}
                                           final activeVid = _activeVideo;
                                           if (activeVid != null) {
@@ -1983,8 +2001,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     iconColor: Colors.white,
                                     onTap: () {
                                       final tracks = player.state.tracks.audio;
-                                      final selectedTrack =
-                                          player.state.track.audio;
+                                      final selectedTrack = player.state.track.audio;
                                       PlayerMenuSheets.showAudioTrackSettings(
                                         context: context,
                                         tracks: tracks,
@@ -2005,11 +2022,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                             _activeAudioDelayMs = delay;
                                           });
                                           try {
-                                            (player.platform as dynamic)
-                                                .setProperty(
-                                                  'audio-delay',
-                                                  '${delay / 1000.0}',
-                                                );
+                                            (player.platform as dynamic).setProperty('audio-delay', '${delay / 1000.0}');
                                           } catch (_) {}
                                           final activeVid = _activeVideo;
                                           if (activeVid != null) {
@@ -2025,16 +2038,38 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   const SizedBox(width: 8),
                                   VeilButton(
                                     type: VeilButtonType.icon,
+                                    icon: settings.focusMode != 'OFF' ? Icons.do_not_disturb_on_rounded : Icons.do_not_disturb_on_outlined,
+                                    iconColor: _isFocusModeActive ? theme.colorScheme.primary : Colors.white,
+                                    onTap: () {
+                                      PlayerMenuSheets.showFocusModeSettings(
+                                        context: context,
+                                        currentMode: settings.focusMode,
+                                        onSelected: (mode) async {
+                                          if (mode == 'ON' || mode == 'AUTO') {
+                                            final granted = await MediaService().isNotificationPolicyAccessGranted();
+                                            if (!granted && mounted) {
+                                              // ignore: use_build_context_synchronously
+                                              FocusModePermissionSheet.show(context);
+                                            }
+                                          }
+                                          ref.read(playerSettingsProvider.notifier).setFocusMode(mode);
+                                          _evaluateFocusMode();
+                                        },
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  VeilButton(
+                                    type: VeilButtonType.icon,
                                     icon: Icons.timer_rounded,
                                     iconColor: Colors.white,
-                                    onTap: () =>
-                                        PlayerMenuSheets.showSleepTimerSettings(
-                                          context: context,
-                                          activeTimer: activeSleepTimer,
-                                          onSelected: (val) {
-                                            _setSleepTimer(val);
-                                          },
-                                        ),
+                                    onTap: () => PlayerMenuSheets.showSleepTimerSettings(
+                                      context: context,
+                                      activeTimer: activeSleepTimer,
+                                      onSelected: (val) {
+                                        _setSleepTimer(val);
+                                      },
+                                    ),
                                   ),
                                   const SizedBox(width: 8),
                                   VeilButton(
@@ -2044,30 +2079,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     onTap: () {
                                       PlayerMenuSheets.showAspectRatioSettings(
                                         context: context,
-                                        currentRatio:
-                                            settings.preferredAspectRatio,
+                                        currentRatio: settings.preferredAspectRatio,
                                         onSelected: (val) {
-                                          ref
-                                              .read(
-                                                playerSettingsProvider.notifier,
-                                              )
-                                              .setPreferredAspectRatio(val);
-
-                                          IconData displayIcon =
-                                              Icons.aspect_ratio_rounded;
-                                          if (val == 'Fill') {
-                                            displayIcon =
-                                                Icons.fullscreen_rounded;
-                                          }
-                                          if (val == 'Stretch') {
-                                            displayIcon =
-                                                Icons.fit_screen_rounded;
-                                          }
-
-                                          _showHUDNotification(
-                                            'Aspect Ratio: $val',
-                                            displayIcon,
-                                          );
+                                          ref.read(playerSettingsProvider.notifier).setPreferredAspectRatio(val);
+                                          
+                                          IconData displayIcon = Icons.aspect_ratio_rounded;
+                                          if (val == 'Fill') displayIcon = Icons.fullscreen_rounded;
+                                          if (val == 'Stretch') displayIcon = Icons.fit_screen_rounded;
+                                          
+                                          _showHUDNotification('Aspect Ratio: $val', displayIcon);
                                         },
                                       );
                                     },
@@ -2078,8 +2098,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     icon: orientationMode == 'Auto'
                                         ? Icons.screen_rotation_rounded
                                         : orientationMode == 'Portrait'
-                                        ? Icons.screen_lock_portrait_rounded
-                                        : Icons.screen_lock_landscape_rounded,
+                                            ? Icons.screen_lock_portrait_rounded
+                                            : Icons.screen_lock_landscape_rounded,
                                     iconColor: Colors.white,
                                     onTap: _toggleOrientationLock,
                                   ),
@@ -2130,24 +2150,33 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               ),
             ),
           ),
+        ),
+
 
           // 8b. Playback Controls Overlay (Bottom bar)
           Positioned(
             bottom: 0,
             left: 0,
             right: 0,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 200),
-              opacity: (showControls && !isLocked) ? 1.0 : 0.0,
-              curve: Curves.easeInOut,
-              child: IgnorePointer(
-                ignoring: !(showControls && !isLocked),
+            child: AnimatedScale(
+              scale: (showControls && !isLocked) ? 1.0 : 0.98,
+              duration: Duration(milliseconds: (showControls && !isLocked) ? 250 : 200),
+              curve: (showControls && !isLocked) ? Curves.easeOutCubic : Curves.easeInCubic,
+              child: AnimatedOpacity(
+                duration: Duration(milliseconds: (showControls && !isLocked) ? 250 : 200),
+                opacity: (showControls && !isLocked) ? 1.0 : 0.0,
+                curve: (showControls && !isLocked) ? Curves.easeOutCubic : Curves.easeInCubic,
+                child: IgnorePointer(
+                  ignoring: !(showControls && !isLocked),
                 child: Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
-                      colors: [Colors.black87, Colors.transparent],
+                      colors: [
+                        Colors.black87,
+                        Colors.transparent,
+                      ],
                     ),
                   ),
                   child: SafeArea(
@@ -2160,9 +2189,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           VeilSlider(
                             value: isDraggingScrubber
                                 ? scrubberDragValue
-                                : position.inMilliseconds
-                                      .clamp(0, maxDuration.toInt())
-                                      .toDouble(),
+                                : position.inMilliseconds.clamp(0, maxDuration.toInt()).toDouble(),
                             min: 0,
                             max: maxDuration,
                             onChangeStart: (val) {
@@ -2179,16 +2206,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                               showControlsTemporarily();
                             },
                             onChangeEnd: (val) {
-                              player
-                                  .seek(Duration(milliseconds: val.toInt()))
-                                  .then((_) {
-                                    if (mounted) {
-                                      setState(() {
-                                        isDraggingScrubber = false;
-                                      });
-                                      _syncMediaSession();
-                                    }
+                              player.seek(Duration(milliseconds: val.toInt())).then((_) {
+                                if (mounted) {
+                                  setState(() {
+                                    isDraggingScrubber = false;
                                   });
+                                  _syncMediaSession();
+                                }
+                              });
                               showControlsTemporarily();
                             },
                           ),
@@ -2198,14 +2223,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                format(
-                                  isDraggingScrubber
-                                      ? Duration(
-                                          milliseconds: scrubberDragValue
-                                              .toInt(),
-                                        )
-                                      : position,
-                                ),
+                                format(isDraggingScrubber
+                                    ? Duration(milliseconds: scrubberDragValue.toInt())
+                                    : position),
                                 style: const TextStyle(
                                   color: Colors.white70,
                                   fontSize: 11,
@@ -2227,7 +2247,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           Row(
                             children: [
                               // 1. Far Left: Spacer/Empty box
-                              const Expanded(child: SizedBox.shrink()),
+                              const Expanded(
+                                child: SizedBox.shrink(),
+                              ),
                               // 2. Center: Skip Previous, Play/Pause, Skip Next
                               Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -2241,9 +2263,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                       shape: BoxShape.circle,
                                       width: 56,
                                       height: 56,
-                                      icon: isPlaying
-                                          ? Icons.pause_rounded
-                                          : Icons.play_arrow_rounded,
+                                      icon: isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                                       iconSize: 34,
                                       onTap: togglePlayPause,
                                     ),
@@ -2261,9 +2281,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                     child: VeilButton(
                                       type: VeilButtonType.icon,
                                       icon: Icons.queue_music_rounded,
-                                      iconColor: showQueuePanel
-                                          ? theme.colorScheme.primary
-                                          : Colors.white38,
+                                      iconColor: showQueuePanel ? theme.colorScheme.primary : Colors.white38,
                                       iconSize: 22,
                                       height: 48,
                                       width: 48,
@@ -2286,6 +2304,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               ),
             ),
           ),
+        ),
 
           // 9. AMOLED Resume Playback Dialog
           if (showResumeDialog)
@@ -2299,10 +2318,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     decoration: BoxDecoration(
                       color: Colors.black,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: theme.colorScheme.primary,
-                        width: 1.5,
-                      ),
+                      border: Border.all(color: theme.colorScheme.primary, width: 1.5),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -2332,9 +2348,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                               child: OutlinedButton(
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(color: Colors.white24),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -2350,10 +2364,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                 },
                                 child: const Text(
                                   'Start Over',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                  ),
+                                  style: TextStyle(color: Colors.white, fontSize: 13),
                                 ),
                               ),
                             ),
@@ -2362,9 +2373,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                               child: ElevatedButton(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: theme.colorScheme.primary,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(8),
                                   ),
@@ -2373,22 +2382,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   setState(() {
                                     showResumeDialog = false;
                                   });
-                                  player
-                                      .seek(
-                                        Duration(milliseconds: savedProgressMs),
-                                      )
-                                      .then((_) {
-                                        _syncMediaSession();
-                                        player.play();
-                                      });
+                                  player.seek(Duration(milliseconds: savedProgressMs)).then((_) {
+                                    _syncMediaSession();
+                                    player.play();
+                                  });
                                 },
                                 child: const Text(
                                   'Resume',
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: TextStyle(color: Colors.black, fontSize: 13, fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
@@ -2400,7 +2401,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 ),
               ),
             ),
-
+          
           // 10. Queue Panel click-outside catcher
           if (showQueuePanel)
             Positioned.fill(
@@ -2419,8 +2420,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           _buildQueuePanel(size, theme),
         ],
       ),
+    ),
     );
   }
+
+
 
   Widget _buildSkipPreviousButton(ThemeData theme) {
     final hasPrev = _currentIndex > 0;
@@ -2440,8 +2444,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildSkipNextButton(ThemeData theme) {
-    final hasNext =
-        _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
+    final hasNext = _currentIndex >= 0 && _currentIndex < _folderVideos.length - 1;
     return Tooltip(
       message: 'Next Video',
       child: VeilButton(
@@ -2460,7 +2463,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Widget _buildQueuePanel(Size size, ThemeData theme) {
     final double panelWidth = size.width * 0.45;
     final double width = panelWidth.clamp(280.0, 420.0);
-
+    
     return AnimatedPositioned(
       duration: VeilMotion.emphasized,
       curve: VeilMotion.curve,

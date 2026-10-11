@@ -20,9 +20,7 @@ class MethodChannelDispatcher {
         try {
           await listener(call);
         } catch (e, stack) {
-          debugPrint(
-            '[MethodChannelDispatcher] Error executing listener: $e\n$stack',
-          );
+          debugPrint('[MethodChannelDispatcher] Error executing listener: $e\n$stack');
         }
       }
       return null;

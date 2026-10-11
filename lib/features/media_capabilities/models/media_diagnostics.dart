@@ -214,16 +214,14 @@ class MediaDiagnostics {
       containerRaw: containerRaw ?? this.containerRaw,
       containerDisplayName: containerDisplayName ?? this.containerDisplayName,
       videoCodecRaw: videoCodecRaw ?? this.videoCodecRaw,
-      videoCodecDisplayName:
-          videoCodecDisplayName ?? this.videoCodecDisplayName,
+      videoCodecDisplayName: videoCodecDisplayName ?? this.videoCodecDisplayName,
       pixelFormat: pixelFormat ?? this.pixelFormat,
       width: width ?? this.width,
       height: height ?? this.height,
       frameRate: frameRate ?? this.frameRate,
       videoBitrate: videoBitrate ?? this.videoBitrate,
       audioCodecRaw: audioCodecRaw ?? this.audioCodecRaw,
-      audioCodecDisplayName:
-          audioCodecDisplayName ?? this.audioCodecDisplayName,
+      audioCodecDisplayName: audioCodecDisplayName ?? this.audioCodecDisplayName,
       audioFormat: audioFormat ?? this.audioFormat,
       audioChannels: audioChannels ?? this.audioChannels,
       audioSampleRate: audioSampleRate ?? this.audioSampleRate,
@@ -231,14 +229,11 @@ class MediaDiagnostics {
       hwDecodeActive: hwDecodeActive ?? this.hwDecodeActive,
       hwDecodeMethod: hwDecodeMethod ?? this.hwDecodeMethod,
       hwDecodeDisplayName: hwDecodeDisplayName ?? this.hwDecodeDisplayName,
-      embeddedSubtitleCount:
-          embeddedSubtitleCount ?? this.embeddedSubtitleCount,
-      externalSubtitleCount:
-          externalSubtitleCount ?? this.externalSubtitleCount,
+      embeddedSubtitleCount: embeddedSubtitleCount ?? this.embeddedSubtitleCount,
+      externalSubtitleCount: externalSubtitleCount ?? this.externalSubtitleCount,
       videoSupportLevel: videoSupportLevel ?? this.videoSupportLevel,
       audioSupportLevel: audioSupportLevel ?? this.audioSupportLevel,
-      containerSupportLevel:
-          containerSupportLevel ?? this.containerSupportLevel,
+      containerSupportLevel: containerSupportLevel ?? this.containerSupportLevel,
       analyzedAt: analyzedAt ?? this.analyzedAt,
     );
   }

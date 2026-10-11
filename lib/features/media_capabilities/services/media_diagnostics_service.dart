@@ -24,8 +24,8 @@ class MediaDiagnosticsService {
   MediaDiagnosticsService({
     CodecDetector? detector,
     FormatSupportService? supportService,
-  }) : _detector = detector ?? const CodecDetector(),
-       _supportService = supportService ?? FormatSupportService();
+  })  : _detector = detector ?? const CodecDetector(),
+        _supportService = supportService ?? FormatSupportService();
 
   // ── Primary API ────────────────────────────────────────────────────────────
 
@@ -81,8 +81,10 @@ class MediaDiagnosticsService {
 
       // Resolve HW decoder
       final hwRaw = props.hwDecodeActive;
-      final hwActive =
-          hwRaw != null && hwRaw.isNotEmpty && hwRaw != 'no' && hwRaw != 'none';
+      final hwActive = hwRaw != null &&
+          hwRaw.isNotEmpty &&
+          hwRaw != 'no' &&
+          hwRaw != 'none';
       final hwDisplayName = hwRaw != null && hwRaw.isNotEmpty && hwRaw != 'no'
           ? _supportService.hwDecodeDisplayName(hwRaw)
           : null;

@@ -8,9 +8,7 @@ void main() {
   testWidgets('Counter increments smoke test', (WidgetTester tester) async {
     // Mock the MethodChannel for native platform interactions
     const channel = MethodChannel('veil_player/media');
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
-      MethodCall methodCall,
-    ) async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (MethodCall methodCall) async {
       switch (methodCall.method) {
         case 'checkPermission':
           return 'granted';
@@ -29,12 +27,16 @@ void main() {
     });
 
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const ProviderScope(child: VeilApp()));
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: VeilApp(),
+      ),
+    );
 
     // Let microtasks and asynchronous tasks finish (e.g. permission check)
     await tester.pumpAndSettle();
 
-    // Verify that our library screen starts and title exists.
-    expect(find.text('VEIL'), findsOneWidget);
+    // Verify that our library screen starts and Continue Watching exists.
+    expect(find.text('Continue Watching'), findsOneWidget);
   });
 }

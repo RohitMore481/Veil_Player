@@ -5,9 +5,7 @@ class MediaStoreService {
 
   Future<bool> refreshFolder(String path) async {
     try {
-      final bool? result = await _channel.invokeMethod('refreshFolder', {
-        'path': path,
-      });
+      final bool? result = await _channel.invokeMethod('refreshFolder', {'path': path});
       return result ?? false;
     } on PlatformException catch (_) {
       return false;
@@ -16,9 +14,7 @@ class MediaStoreService {
 
   Future<bool> shareVideo(String path) async {
     try {
-      final bool? result = await _channel.invokeMethod('shareVideo', {
-        'path': path,
-      });
+      final bool? result = await _channel.invokeMethod('shareVideo', {'path': path});
       return result ?? false;
     } on PlatformException catch (_) {
       return false;
@@ -27,10 +23,7 @@ class MediaStoreService {
 
   Future<Map<dynamic, dynamic>?> getVideoMetadata(String path) async {
     try {
-      final Map<dynamic, dynamic>? result = await _channel.invokeMethod(
-        'getVideoMetadata',
-        {'path': path},
-      );
+      final Map<dynamic, dynamic>? result = await _channel.invokeMethod('getVideoMetadata', {'path': path});
       return result;
     } on PlatformException catch (_) {
       return null;

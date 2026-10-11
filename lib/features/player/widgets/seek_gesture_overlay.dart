@@ -45,10 +45,7 @@ class SeekGestureOverlay extends StatelessWidget {
     final isForward = deltaSeconds >= 0;
 
     final progressFactor = totalDuration.inMilliseconds > 0
-        ? (targetPosition.inMilliseconds / totalDuration.inMilliseconds).clamp(
-            0.0,
-            1.0,
-          )
+        ? (targetPosition.inMilliseconds / totalDuration.inMilliseconds).clamp(0.0, 1.0)
         : 0.0;
 
     return Center(
@@ -67,9 +64,7 @@ class SeekGestureOverlay extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
-                  isForward
-                      ? Icons.fast_forward_rounded
-                      : Icons.fast_rewind_rounded,
+                  isForward ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded,
                   color: theme.colorScheme.primary,
                   size: 24,
                 ),

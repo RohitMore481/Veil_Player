@@ -1,21 +1,25 @@
 import 'package:flutter/services.dart';
 
-enum FileOpResult { success, safPermissionRequired, cancelled, error }
+enum FileOpResult {
+  success,
+  safPermissionRequired,
+  cancelled,
+  error,
+}
 
 class FileOperationService {
   static const _channel = MethodChannel('veil_player/media');
 
-  Future<FileOpResult> renameVideo(
-    String id,
-    String path,
-    String newName,
-  ) async {
+  Future<FileOpResult> renameVideo(String id, String path, String newName) async {
     try {
-      final String? result = await _channel.invokeMethod('renameVideo', {
-        'id': id,
-        'path': path,
-        'newName': newName,
-      });
+      final String? result = await _channel.invokeMethod(
+        'renameVideo',
+        {
+          'id': id,
+          'path': path,
+          'newName': newName,
+        },
+      );
       return _mapStringToResult(result);
     } on PlatformException catch (_) {
       return FileOpResult.error;
@@ -24,25 +28,28 @@ class FileOperationService {
 
   Future<FileOpResult> deleteVideo(String id, String path) async {
     try {
-      final String? result = await _channel.invokeMethod('deleteVideo', {
-        'id': id,
-        'path': path,
-      });
+      final String? result = await _channel.invokeMethod(
+        'deleteVideo',
+        {
+          'id': id,
+          'path': path,
+        },
+      );
       return _mapStringToResult(result);
     } on PlatformException catch (_) {
       return FileOpResult.error;
     }
   }
 
-  Future<FileOpResult> deleteVideosBatch(
-    List<String> ids,
-    List<String> paths,
-  ) async {
+  Future<FileOpResult> deleteVideosBatch(List<String> ids, List<String> paths) async {
     try {
-      final String? result = await _channel.invokeMethod('deleteVideosBatch', {
-        'ids': ids,
-        'paths': paths,
-      });
+      final String? result = await _channel.invokeMethod(
+        'deleteVideosBatch',
+        {
+          'ids': ids,
+          'paths': paths,
+        },
+      );
       return _mapStringToResult(result);
     } on PlatformException catch (_) {
       return FileOpResult.error;
@@ -51,10 +58,13 @@ class FileOperationService {
 
   Future<FileOpResult> renameFolder(String path, String newName) async {
     try {
-      final String? result = await _channel.invokeMethod('renameFolder', {
-        'path': path,
-        'newName': newName,
-      });
+      final String? result = await _channel.invokeMethod(
+        'renameFolder',
+        {
+          'path': path,
+          'newName': newName,
+        },
+      );
       return _mapStringToResult(result);
     } on PlatformException catch (_) {
       return FileOpResult.error;
@@ -63,9 +73,74 @@ class FileOperationService {
 
   Future<FileOpResult> deleteFolder(String path) async {
     try {
-      final String? result = await _channel.invokeMethod('deleteFolder', {
-        'path': path,
-      });
+      final String? result = await _channel.invokeMethod(
+        'deleteFolder',
+        {
+          'path': path,
+        },
+      );
+      return _mapStringToResult(result);
+    } on PlatformException catch (_) {
+      return FileOpResult.error;
+    }
+  }
+
+  Future<FileOpResult> copyVideo(String path, String targetFolder) async {
+    try {
+      final String? result = await _channel.invokeMethod(
+        'copyVideo',
+        {
+          'path': path,
+          'targetFolder': targetFolder,
+        },
+      );
+      return _mapStringToResult(result);
+    } on PlatformException catch (_) {
+      return FileOpResult.error;
+    }
+  }
+
+  Future<FileOpResult> moveVideo(String id, String path, String targetFolder) async {
+    try {
+      final String? result = await _channel.invokeMethod(
+        'moveVideo',
+        {
+          'id': id,
+          'path': path,
+          'targetFolder': targetFolder,
+        },
+      );
+      return _mapStringToResult(result);
+    } on PlatformException catch (_) {
+      return FileOpResult.error;
+    }
+  }
+
+  Future<FileOpResult> copyVideosBatch(List<String> paths, String targetFolder) async {
+    try {
+      final String? result = await _channel.invokeMethod(
+        'copyVideosBatch',
+        {
+          'paths': paths,
+          'targetFolder': targetFolder,
+        },
+      );
+      return _mapStringToResult(result);
+    } on PlatformException catch (_) {
+      return FileOpResult.error;
+    }
+  }
+
+  Future<FileOpResult> moveVideosBatch(List<String> ids, List<String> paths, String targetFolder) async {
+    try {
+      final String? result = await _channel.invokeMethod(
+        'moveVideosBatch',
+        {
+          'ids': ids,
+          'paths': paths,
+          'targetFolder': targetFolder,
+        },
+      );
       return _mapStringToResult(result);
     } on PlatformException catch (_) {
       return FileOpResult.error;

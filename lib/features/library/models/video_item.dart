@@ -7,6 +7,7 @@ class VideoItem {
   final DateTime dateAdded;
   final String folderName;
   final String? thumbnailPath;
+  final bool isWatched;
 
   const VideoItem({
     required this.id,
@@ -17,6 +18,7 @@ class VideoItem {
     required this.dateAdded,
     required this.folderName,
     this.thumbnailPath,
+    this.isWatched = true,
   });
 
   VideoItem copyWith({
@@ -28,6 +30,7 @@ class VideoItem {
     DateTime? dateAdded,
     String? folderName,
     String? thumbnailPath,
+    bool? isWatched,
   }) {
     return VideoItem(
       id: id ?? this.id,
@@ -38,6 +41,7 @@ class VideoItem {
       dateAdded: dateAdded ?? this.dateAdded,
       folderName: folderName ?? this.folderName,
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
+      isWatched: isWatched ?? this.isWatched,
     );
   }
 
@@ -53,6 +57,7 @@ class VideoItem {
       ),
       folderName: map['folderName'] as String,
       thumbnailPath: map['thumbnailPath'] as String?,
+      isWatched: map['isWatched'] as bool? ?? true,
     );
   }
 
@@ -66,6 +71,7 @@ class VideoItem {
       'dateAdded': dateAdded.millisecondsSinceEpoch ~/ 1000,
       'folderName': folderName,
       'thumbnailPath': thumbnailPath,
+      'isWatched': isWatched,
     };
   }
 
@@ -73,7 +79,7 @@ class VideoItem {
     final hours = duration.inHours;
     final minutes = duration.inMinutes.remainder(60);
     final seconds = duration.inSeconds.remainder(60);
-
+    
     final minStr = minutes.toString().padLeft(2, '0');
     final secStr = seconds.toString().padLeft(2, '0');
 
@@ -124,23 +130,77 @@ class FolderItem {
   final String name;
   final String path;
   final int count;
+  final int newVideosCount;
   final bool containsMovies;
 
   const FolderItem({
     required this.name,
     required this.path,
     required this.count,
+    this.newVideosCount = 0,
     required this.containsMovies,
   });
 
-  factory FolderItem.fromMap(Map<dynamic, dynamic> map) {
+    factory FolderItem.fromMap(Map<dynamic, dynamic> map) {
     return FolderItem(
       name: map['name'] as String,
       path: map['path'] as String? ?? '',
       count: (map['count'] as num).toInt(),
+      newVideosCount: (map['newVideosCount'] as num?)?.toInt() ?? 0,
       containsMovies: map['containsMovies'] as bool? ?? false,
     );
   }
+
+  /// Determines the single folder that best matches the last-watched video path.
+  /// Guarantees at most ONE folder is ever returned, preventing multi-folder highlighting.
+  static FolderItem? findLastWatchedFolder(
+    List<FolderItem> folders,
+    String? lastWatchedVideoPath,
+  ) {
+    if (lastWatchedVideoPath == null || lastWatchedVideoPath.isEmpty || folders.isEmpty) {
+      return null;
+    }
+
+    final normVideoPath = lastWatchedVideoPath.replaceAll('\\', '/').toLowerCase();
+    final lastSlash = normVideoPath.lastIndexOf('/');
+    final directParentPath = lastSlash != -1 ? normVideoPath.substring(0, lastSlash) : '';
+
+    // Priority 1: Exact match with the video's immediate parent directory
+    if (directParentPath.isNotEmpty) {
+      for (final folder in folders) {
+        final normFolder = folder.path.replaceAll('\\', '/').toLowerCase();
+        if (normFolder == directParentPath) {
+          return folder;
+        }
+      }
+    }
+
+    // Priority 2: Deepest (longest path) matching ancestor directory
+    FolderItem? bestAncestorMatch;
+    int bestMatchLength = -1;
+
+    for (final folder in folders) {
+      final normFolder = folder.path.replaceAll('\\', '/').toLowerCase();
+      if (normFolder.isNotEmpty && normVideoPath.startsWith('$normFolder/')) {
+        if (normFolder.length > bestMatchLength) {
+          bestMatchLength = normFolder.length;
+          bestAncestorMatch = folder;
+        }
+      }
+    }
+
+    return bestAncestorMatch;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FolderItem &&
+          runtimeType == other.runtimeType &&
+          path == other.path;
+
+  @override
+  int get hashCode => path.hashCode;
 }
 
 class PlaybackHistoryItem {
@@ -172,7 +232,7 @@ class PlaybackHistoryItem {
   }
 
   double get progress => durationMs > 0 ? positionMs / durationMs : 0.0;
-
+  
   String get remainingTime {
     final remainingMs = durationMs - positionMs;
     if (remainingMs <= 0) return 'Finished';

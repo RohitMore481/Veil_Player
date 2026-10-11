@@ -71,8 +71,7 @@ class CodecRegistry {
   List<ContainerInfo> get containers => _containers.values.toList();
 
   /// All registered subtitle formats.
-  List<SubtitleFormatInfo> get subtitleFormats =>
-      _subtitleFormats.values.toList();
+  List<SubtitleFormatInfo> get subtitleFormats => _subtitleFormats.values.toList();
 
   /// All registered codec packs.
   List<CodecPack> get registeredPacks => List.unmodifiable(_registeredPacks);
@@ -81,11 +80,13 @@ class CodecRegistry {
 
   /// Look up a video codec by its mpv identifier (case-insensitive).
   /// Returns null if unknown.
-  VideoCodecInfo? findVideoCodec(String id) => _videoCodecs[id.toLowerCase()];
+  VideoCodecInfo? findVideoCodec(String id) =>
+      _videoCodecs[id.toLowerCase()];
 
   /// Look up an audio codec by its mpv identifier (case-insensitive).
   /// Returns null if unknown.
-  AudioCodecInfo? findAudioCodec(String id) => _audioCodecs[id.toLowerCase()];
+  AudioCodecInfo? findAudioCodec(String id) =>
+      _audioCodecs[id.toLowerCase()];
 
   /// Look up a container by its mpv file-format string or extension.
   ContainerInfo? findContainer(String idOrExtension) {
@@ -110,15 +111,13 @@ class CodecRegistry {
   /// Whether a file extension is a recognised media container.
   bool isKnownContainer(String extension) {
     final key = extension.toLowerCase().replaceAll('.', '');
-    return _extensionToContainer.containsKey(key) ||
-        _containers.containsKey(key);
+    return _extensionToContainer.containsKey(key) || _containers.containsKey(key);
   }
 
   /// Whether a file extension is a recognised subtitle format.
   bool isKnownSubtitleExtension(String extension) {
     final key = extension.toLowerCase().replaceAll('.', '');
-    return _extensionToSubtitle.containsKey(key) ||
-        _subtitleFormats.containsKey(key);
+    return _extensionToSubtitle.containsKey(key) || _subtitleFormats.containsKey(key);
   }
 
   // ── Extension pack registration ────────────────────────────────────────────

@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../player/providers/player_settings_provider.dart';
 import '../../library/providers/media_provider.dart';
+import '../../library/services/media_service.dart';
+import '../../player/widgets/focus_mode_permission_sheet.dart';
+import 'diagnostics_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -10,8 +13,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends ConsumerState<SettingsScreen>
-    with AutomaticKeepAliveClientMixin {
+class _SettingsScreenState extends ConsumerState<SettingsScreen> with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -42,12 +44,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(
-          16.0,
-          8.0,
-          16.0,
-          100.0,
-        ), // clear navigation bar clearance
+        padding: const EdgeInsets.fromLTRB(16.0, 8.0, 16.0, 100.0), // clear navigation bar clearance
         children: [
           _buildSectionHeader(theme, 'Playback'),
           _buildSwitchTile(
@@ -83,6 +80,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
               );
             },
           ),
+          _buildSelectionTile(
+            title: 'Focus Mode (Cinema Mode)',
+            subtitle: _getFocusModeSubtitle(settings.focusMode),
+            onTap: () {
+              _showSelectionDialog(
+                title: 'Focus Mode',
+                options: ['Off', 'On', 'Auto (Fullscreen)'],
+                currentValue: _getFocusModeName(settings.focusMode),
+                onSelected: (val) async {
+                  final code = _getFocusModeCode(val);
+                  if (code == 'ON' || code == 'AUTO') {
+                    final granted = await MediaService().isNotificationPolicyAccessGranted();
+                    if (!granted && mounted) {
+                      // ignore: use_build_context_synchronously
+                      FocusModePermissionSheet.show(context);
+                    }
+                  }
+                  notifier.setFocusMode(code);
+                },
+              );
+            },
+          ),
+
 
           _buildSectionHeader(theme, 'Subtitles'),
           _buildSliderTile(
@@ -143,8 +163,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           _buildSliderTile(
             title: 'Vertical Margins Padding',
-            subtitle:
-                '${(subSettings.verticalPosition * 100).toInt()}% from screen bottom',
+            subtitle: '${(subSettings.verticalPosition * 100).toInt()}% from screen bottom',
             value: subSettings.verticalPosition,
             min: 0.01,
             max: 0.35,
@@ -209,13 +228,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             onTap: () {
               _showSelectionDialog(
                 title: 'Theme Accent',
-                options: [
-                  'Emerald',
-                  'Ruby Red',
-                  'Sapphire Blue',
-                  'Amber Gold',
-                  'Nothing Silver',
-                ],
+                options: ['Emerald', 'Ruby Red', 'Sapphire Blue', 'Amber Gold', 'Nothing Silver'],
                 currentValue: settings.themeAccent,
                 onSelected: (val) => notifier.setThemeAccent(val),
               );
@@ -232,41 +245,41 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           const SizedBox(height: 16),
 
+          _buildSectionHeader(theme, 'Diagnostics'),
+          _buildActionTile(
+            title: 'Crash & Playback Reports',
+            subtitle: 'Locally captured error logs and anomaly diagnostics',
+            icon: Icons.bug_report_outlined,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const DiagnosticsScreen()),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
           _buildSectionHeader(theme, 'About'),
           ListTile(
             contentPadding: EdgeInsets.zero,
             title: Text(
               'Veil Player Version',
-              style: TextStyle(
-                color: theme.colorScheme.onSurface,
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 15, fontWeight: FontWeight.w500),
             ),
             subtitle: Text(
               'v1.0.0 • Premium Offline Media Engine',
-              style: TextStyle(
-                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-                fontSize: 13,
-              ),
+              style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 13),
             ),
             trailing: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
                 color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                border: Border.all(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                  width: 1,
-                ),
+                border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.3), width: 1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 'STABLE',
-                style: TextStyle(
-                  color: theme.colorScheme.primary,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -284,8 +297,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           ),
           _buildActionTile(
             title: 'Privacy Policy',
-            subtitle:
-                'Read about our local-first, zero-data tracking guarantee',
+            subtitle: 'Read about our local-first, zero-data tracking guarantee',
             icon: Icons.privacy_tip_outlined,
             onTap: _showPrivacyDialog,
           ),
@@ -319,17 +331,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       contentPadding: EdgeInsets.zero,
       title: Text(
         title,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-        ),
+        style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15, fontWeight: FontWeight.w500),
       ),
       subtitle: Text(
         subtitle,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 13,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-        ),
+        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
       ),
       value: value,
       onChanged: onChanged,
@@ -353,22 +359,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           children: [
             Text(
               title,
-              style: theme.textTheme.bodyLarge?.copyWith(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
+              style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15, fontWeight: FontWeight.w500),
             ),
             Text(
               subtitle,
-              style: TextStyle(
-                color: theme.colorScheme.primary,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w600),
             ),
           ],
         ),
-        Slider(value: value, min: min, max: max, onChanged: onChanged),
+        Slider(
+          value: value,
+          min: min,
+          max: max,
+          onChanged: onChanged,
+        ),
       ],
     );
   }
@@ -384,23 +388,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       onTap: onTap,
       title: Text(
         title,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-        ),
+        style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15, fontWeight: FontWeight.w500),
       ),
       subtitle: Text(
         subtitle,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 13,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-        ),
+        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
       ),
-      trailing: Icon(
-        Icons.arrow_forward_ios_rounded,
-        color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-        size: 16,
-      ),
+      trailing: Icon(Icons.arrow_forward_ios_rounded, color: theme.colorScheme.onSurface.withValues(alpha: 0.3), size: 16),
     );
   }
 
@@ -416,17 +410,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
       onTap: onTap,
       title: Text(
         title,
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-        ),
+        style: theme.textTheme.bodyLarge?.copyWith(fontSize: 15, fontWeight: FontWeight.w500),
       ),
       subtitle: Text(
         subtitle,
-        style: theme.textTheme.bodyMedium?.copyWith(
-          fontSize: 13,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-        ),
+        style: theme.textTheme.bodyMedium?.copyWith(fontSize: 13, color: theme.colorScheme.onSurface.withValues(alpha: 0.6)),
       ),
       trailing: Icon(icon, color: theme.colorScheme.primary, size: 20),
     );
@@ -436,7 +424,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
     final theme = Theme.of(context);
     ref.invalidate(foldersProvider);
     ref.invalidate(folderVideosProvider(null));
-
+    
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -449,9 +437,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
             ),
           ],
         ),
-        backgroundColor: theme.brightness == Brightness.dark
-            ? const Color(0xFF111111)
-            : const Color(0xFFF3F4F6),
+        backgroundColor: theme.brightness == Brightness.dark ? const Color(0xFF111111) : const Color(0xFFF3F4F6),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -459,9 +445,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
   Future<void> _clearThumbnailCache() async {
     final theme = Theme.of(context);
-    final success = await ref
-        .read(mediaRepositoryProvider)
-        .clearThumbnailCache();
+    final success = await ref.read(mediaRepositoryProvider).clearThumbnailCache();
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -469,23 +453,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
         content: Row(
           children: [
             Icon(
-              success
-                  ? Icons.check_circle_rounded
-                  : Icons.error_outline_rounded,
+              success ? Icons.check_circle_rounded : Icons.error_outline_rounded,
               color: success ? Colors.greenAccent : Colors.redAccent,
             ),
             const SizedBox(width: 8),
             Text(
-              success
-                  ? 'Thumbnail cache cleared successfully'
-                  : 'Failed to clear thumbnail cache',
+              success ? 'Thumbnail cache cleared successfully' : 'Failed to clear thumbnail cache',
               style: TextStyle(color: theme.colorScheme.primary),
             ),
           ],
         ),
-        backgroundColor: theme.brightness == Brightness.dark
-            ? const Color(0xFF111111)
-            : const Color(0xFFF3F4F6),
+        backgroundColor: theme.brightness == Brightness.dark ? const Color(0xFF111111) : const Color(0xFFF3F4F6),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -500,38 +478,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           backgroundColor: theme.colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF1E1E1E)
-                  : const Color(0xFFE5E7EB),
-              width: 1,
-            ),
+            side: BorderSide(color: theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB), width: 1),
           ),
           title: Text(
             'Privacy Guarantee',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           content: Text(
             'Veil Player is a local-first video player. We do not transmit, analyze, or collect any logs, file details, or usage patterns. Your playback history and subtitle details remain securely stored inside private sandbox databases on your device.\n\nEnjoy pure, offline entertainment.',
-            style: TextStyle(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-              fontSize: 13,
-              height: 1.5,
-            ),
+            style: TextStyle(color: theme.colorScheme.onSurface.withValues(alpha: 0.7), fontSize: 13, height: 1.5),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: Text(
                 'Close',
-                style: TextStyle(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -554,20 +516,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
           backgroundColor: theme.colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: theme.brightness == Brightness.dark
-                  ? const Color(0xFF1E1E1E)
-                  : const Color(0xFFE5E7EB),
-              width: 1,
-            ),
+            side: BorderSide(color: theme.brightness == Brightness.dark ? const Color(0xFF1E1E1E) : const Color(0xFFE5E7EB), width: 1),
           ),
           title: Text(
             title,
-            style: TextStyle(
-              color: theme.colorScheme.onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: theme.colorScheme.onSurface, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -577,20 +530,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
                 title: Text(
                   opt,
                   style: TextStyle(
-                    color: isSelected
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.onSurface,
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
+                    color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurface,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
                 trailing: isSelected
-                    ? Icon(
-                        Icons.check,
-                        color: theme.colorScheme.primary,
-                        size: 20,
-                      )
+                    ? Icon(Icons.check, color: theme.colorScheme.primary, size: 20)
                     : null,
                 onTap: () {
                   onSelected(opt);
@@ -606,10 +551,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
   String _getRepeatModeName(String code) {
     switch (code) {
-      case 'one':
-        return 'Repeat One';
-      case 'folder':
-        return 'Repeat Folder';
+      case 'one': return 'Repeat One';
+      case 'folder': return 'Repeat Folder';
       case 'off':
       default:
         return 'Off';
@@ -618,43 +561,58 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
   String _getRepeatModeCode(String name) {
     switch (name) {
-      case 'Repeat One':
-        return 'one';
-      case 'Repeat Folder':
-        return 'folder';
+      case 'Repeat One': return 'one';
+      case 'Repeat Folder': return 'folder';
       case 'Off':
       default:
         return 'off';
     }
   }
 
+  String _getFocusModeName(String code) {
+    switch (code) {
+      case 'ON': return 'On';
+      case 'AUTO': return 'Auto (Fullscreen)';
+      case 'OFF':
+      default: return 'Off';
+    }
+  }
+
+  String _getFocusModeCode(String name) {
+    switch (name) {
+      case 'On': return 'ON';
+      case 'Auto (Fullscreen)': return 'AUTO';
+      case 'Off':
+      default: return 'OFF';
+    }
+  }
+
+  String _getFocusModeSubtitle(String code) {
+    switch (code) {
+      case 'ON': return 'Always active during playback';
+      case 'AUTO': return 'Auto-activate on fullscreen';
+      case 'OFF':
+      default: return 'Off • Allow notification popups';
+    }
+  }
+
   String _getColorName(String hex) {
     switch (hex.toUpperCase()) {
-      case '#FFFFFF':
-        return 'White';
-      case '#FFFF00':
-        return 'Yellow';
-      case '#00FF00':
-        return 'Green';
-      case '#00FFFF':
-        return 'Cyan';
-      default:
-        return 'White';
+      case '#FFFFFF': return 'White';
+      case '#FFFF00': return 'Yellow';
+      case '#00FF00': return 'Green';
+      case '#00FFFF': return 'Cyan';
+      default: return 'White';
     }
   }
 
   String _getColorHex(String name) {
     switch (name) {
-      case 'White':
-        return '#FFFFFF';
-      case 'Yellow':
-        return '#FFFF00';
-      case 'Green':
-        return '#00FF00';
-      case 'Cyan':
-        return '#00FFFF';
-      default:
-        return '#FFFFFF';
+      case 'White': return '#FFFFFF';
+      case 'Yellow': return '#FFFF00';
+      case 'Green': return '#00FF00';
+      case 'Cyan': return '#00FFFF';
+      default: return '#FFFFFF';
     }
   }
 
@@ -666,14 +624,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen>
 
   String _getBgHex(String name) {
     switch (name) {
-      case 'None':
-        return '#00000000';
-      case 'Semi-Transparent':
-        return '#80000000';
-      case 'Solid':
-        return '#FF000000';
-      default:
-        return '#00000000';
+      case 'None': return '#00000000';
+      case 'Semi-Transparent': return '#80000000';
+      case 'Solid': return '#FF000000';
+      default: return '#00000000';
     }
   }
 }
+

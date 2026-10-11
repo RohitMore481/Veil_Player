@@ -30,17 +30,14 @@ class VeilButton extends StatefulWidget {
     this.iconSize = 20,
     this.shape = BoxShape.rectangle,
     this.iconColor,
-  }) : assert(
-         child != null || label != null || icon != null,
-         'Must provide child, label, or icon',
-       );
+  }) : assert(child != null || label != null || icon != null,
+            'Must provide child, label, or icon');
 
   @override
   State<VeilButton> createState() => _VeilButtonState();
 }
 
-class _VeilButtonState extends State<VeilButton>
-    with SingleTickerProviderStateMixin {
+class _VeilButtonState extends State<VeilButton> with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _scaleAnimation;
 
@@ -51,13 +48,9 @@ class _VeilButtonState extends State<VeilButton>
       vsync: this,
       duration: VeilMotion.fast,
     );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: VeilMotion.scaleButton)
-        .animate(
-          CurvedAnimation(
-            parent: _animationController,
-            curve: VeilMotion.curveSharp,
-          ),
-        );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: VeilMotion.scaleButton).animate(
+      CurvedAnimation(parent: _animationController, curve: VeilMotion.curveSharp),
+    );
   }
 
   @override
@@ -102,31 +95,25 @@ class _VeilButtonState extends State<VeilButton>
     } else {
       final children = <Widget>[];
       if (widget.icon != null) {
-        children.add(
-          Icon(
-            widget.icon,
-            size: widget.iconSize,
-            color:
-                widget.iconColor ??
-                (widget.type == VeilButtonType.primary
-                    ? Colors.black
-                    : theme.colorScheme.onSurface),
-          ),
-        );
+        children.add(Icon(
+          widget.icon,
+          size: widget.iconSize,
+          color: widget.iconColor ?? (widget.type == VeilButtonType.primary
+              ? Colors.black
+              : theme.colorScheme.onSurface),
+        ));
       }
       if (widget.label != null) {
         if (children.isNotEmpty) children.add(const SizedBox(width: 8));
-        children.add(
-          Text(
-            widget.label!,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: widget.type == VeilButtonType.primary
-                  ? Colors.black
-                  : theme.colorScheme.onSurface,
-              fontWeight: FontWeight.w500,
-            ),
+        children.add(Text(
+          widget.label!,
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: widget.type == VeilButtonType.primary
+                ? Colors.black
+                : theme.colorScheme.onSurface,
+            fontWeight: FontWeight.w500,
           ),
-        );
+        ));
       }
       buttonContent = Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -135,7 +122,7 @@ class _VeilButtonState extends State<VeilButton>
       );
     }
 
-    BoxDecoration decoration;
+     BoxDecoration decoration;
     EdgeInsets padding = widget.shape == BoxShape.circle
         ? EdgeInsets.zero
         : const EdgeInsets.symmetric(horizontal: 16);
@@ -145,9 +132,7 @@ class _VeilButtonState extends State<VeilButton>
         decoration = BoxDecoration(
           color: widget.isDisabled ? theme.disabledColor : accentColor,
           shape: widget.shape,
-          borderRadius: widget.shape == BoxShape.circle
-              ? null
-              : BorderRadius.circular(12),
+          borderRadius: widget.shape == BoxShape.circle ? null : BorderRadius.circular(12),
         );
         break;
       case VeilButtonType.secondary:
@@ -156,17 +141,14 @@ class _VeilButtonState extends State<VeilButton>
               ? const Color(0xFF111111)
               : const Color(0xFFF3F4F6),
           shape: widget.shape,
-          borderRadius: widget.shape == BoxShape.circle
-              ? null
-              : BorderRadius.circular(12),
+          borderRadius: widget.shape == BoxShape.circle ? null : BorderRadius.circular(12),
           border: widget.shape == BoxShape.circle
               ? null
               : Border.all(
                   color: theme.brightness == Brightness.dark
                       ? const Color(0xFF1E1E1E)
                       : const Color(0xFFE5E7EB),
-                  width: 1,
-                ),
+                  width: 1),
         );
         break;
       case VeilButtonType.text:
@@ -198,7 +180,9 @@ class _VeilButtonState extends State<VeilButton>
               width: widget.width ?? widget.height,
               height: widget.height,
               alignment: Alignment.center,
-              decoration: const BoxDecoration(shape: BoxShape.circle),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+              ),
               child: Icon(
                 widget.icon,
                 size: widget.iconSize,

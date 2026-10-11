@@ -28,6 +28,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import android.provider.Settings
 import java.io.File
 import java.io.FileOutputStream
 import java.util.LinkedHashSet
@@ -42,9 +43,14 @@ class MainActivity : FlutterActivity() {
     private val CHANNEL_ID = "veil_player_channel"
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var originalInterruptionFilter: Int? = null
     private val PICK_SUBTITLE_REQUEST_CODE = 4568
+    private val SETTINGS_REQUEST_CODE = 4573
     private var permissionResult: MethodChannel.Result? = null
+    private var pendingSettingsResult: MethodChannel.Result? = null
     private var subtitleResult: MethodChannel.Result? = null
+    private val AUDIO_PERMISSION_REQUEST_CODE = 4574
+    private var audioPermissionResult: MethodChannel.Result? = null
     private var isPipEnabled = false
     private var pipAspectRatioNumerator = 16
     private var pipAspectRatioDenominator = 9
@@ -77,11 +83,32 @@ class MainActivity : FlutterActivity() {
         val name: String,
         val path: String,
         var count: Int,
-        var containsMovies: Boolean
+        var newVideosCount: Int,
+        var containsMovies: Boolean,
+        var shortClipsCount: Int
+    )
+
+    private data class AudioFolderInfo(
+        val name: String,
+        val path: String,
+        var count: Int,
+        var totalDuration: Long,
+        var totalSize: Long
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Install safe native uncaught exception handler preserving system crash semantics
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val crashMarkerFile = File(filesDir, "native_crash_marker.txt")
+                crashMarkerFile.writeText("NATIVE_CRASH:${System.currentTimeMillis()}:${throwable.javaClass.simpleName}")
+            } catch (_: Exception) {}
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
         // Request high refresh rate (120Hz)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val lp = window.attributes
@@ -131,10 +158,10 @@ class MainActivity : FlutterActivity() {
                             PlaybackState.ACTION_SKIP_TO_PREVIOUS or
                             PlaybackState.ACTION_SEEK_TO
                         )
-                        .setState(PlaybackState.STATE_PLAYING, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f)
+                        .setState(PlaybackState.STATE_STOPPED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 0.0f)
                         .build()
                     setPlaybackState(state)
-                    isActive = true
+                    isActive = false
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -173,8 +200,7 @@ class MainActivity : FlutterActivity() {
                     requestSafPermission(path, result)
                 }
                 "openSettings" -> {
-                    openSettings()
-                    result.success(true)
+                    openSettings(result)
                 }
                 "getVideos" -> {
                     val limit = call.argument<Int>("limit") ?: 50
@@ -185,6 +211,22 @@ class MainActivity : FlutterActivity() {
                 }
                 "getFolders" -> {
                     getFolders(result)
+                }
+                "checkAudioPermission" -> {
+                    result.success(getAudioPermissionStatus())
+                }
+                "requestAudioPermission" -> {
+                    requestAudioPermissions(result)
+                }
+                "getAudioTracks" -> {
+                    val limit = call.argument<Int>("limit") ?: 50
+                    val offset = call.argument<Int>("offset") ?: 0
+                    val folderName = call.argument<String>("folderName")
+                    val folderPath = call.argument<String>("folderPath")
+                    getAudioTracks(limit, offset, folderName, folderPath, result)
+                }
+                "getAudioFolders" -> {
+                    getAudioFolders(result)
                 }
                 "renameVideo" -> {
                     val id = call.argument<String>("id")
@@ -212,6 +254,44 @@ class MainActivity : FlutterActivity() {
                         deleteVideosBatch(ids, paths, result)
                     } else {
                         result.error("INVALID_ARGUMENTS", "ids and paths are required and must be of same length", null)
+                    }
+                }
+                "copyVideo" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (path.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        copyVideo(path, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "path and targetFolder are required", null)
+                    }
+                }
+                "moveVideo" -> {
+                    val id = call.argument<String>("id") ?: ""
+                    val path = call.argument<String>("path") ?: ""
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (id.isNotEmpty() && path.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        moveVideo(id, path, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "id, path, and targetFolder are required", null)
+                    }
+                }
+                "copyVideosBatch" -> {
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (paths.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        copyVideosBatch(paths, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "paths and targetFolder are required", null)
+                    }
+                }
+                "moveVideosBatch" -> {
+                    val ids = call.argument<List<String>>("ids") ?: emptyList()
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    val targetFolder = call.argument<String>("targetFolder") ?: ""
+                    if (ids.isNotEmpty() && paths.isNotEmpty() && targetFolder.isNotEmpty()) {
+                        moveVideosBatch(ids, paths, targetFolder, result)
+                    } else {
+                        result.error("INVALID_ARGUMENTS", "ids, paths, and targetFolder are required", null)
                     }
                 }
                 "renameFolder" -> {
@@ -385,12 +465,48 @@ class MainActivity : FlutterActivity() {
                     val position = call.argument<Number>("position")?.toLong() ?: 0L
                     val duration = call.argument<Number>("duration")?.toLong() ?: 0L
                     updateActiveMediaSession(title, isPlaying, position, duration)
-                    showMediaNotification(title, isPlaying)
+                    result.success(true)
+                }
+                "isNotificationPolicyAccessGranted" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        result.success(notificationManager.isNotificationPolicyAccessGranted)
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "openNotificationPolicySettings" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OPEN_SETTINGS_FAILED", e.message, null)
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+                "setFocusModeEnabled" -> {
+                    val enable = call.argument<Boolean>("enable") ?: false
+                    setFocusModeEnabled(enable)
                     result.success(true)
                 }
                 "saveCrashLog" -> {
                     val log = call.argument<String>("log") ?: ""
                     saveCrashLog(log, result)
+                }
+                "getAppPrivateDirectory" -> {
+                    result.success(filesDir.absolutePath)
+                }
+                "getDeviceInfo" -> {
+                    getDeviceInfo(result)
+                }
+                "shareReportFile" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val title = call.argument<String>("title") ?: "Share Diagnostic Report"
+                    shareReportFile(path, title, result)
                 }
                 else -> {
                     result.notImplemented()
@@ -403,6 +519,10 @@ class MainActivity : FlutterActivity() {
         val context = this
         val sharedPrefs = getSharedPreferences("veil_player_prefs", Context.MODE_PRIVATE)
         val hasRequested = sharedPrefs.getBoolean("has_requested_permissions", false)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && android.os.Environment.isExternalStorageManager()) {
+            return "granted"
+        }
 
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
             val hasVideo = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED
@@ -646,12 +766,14 @@ class MainActivity : FlutterActivity() {
         val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             arrayOf(
                 Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO,
                 Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
                 Manifest.permission.POST_NOTIFICATIONS
             )
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(
                 Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO,
                 Manifest.permission.POST_NOTIFICATIONS
             )
         } else {
@@ -665,24 +787,113 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_CODE) {
             val sharedPrefs = getSharedPreferences("veil_player_prefs", Context.MODE_PRIVATE)
-            sharedPrefs.edit().putBoolean("has_requested_permissions", true).apply()
+            sharedPrefs.edit()
+                .putBoolean("has_requested_permissions", true)
+                .putBoolean("has_requested_audio_permissions", true)
+                .apply()
 
             val status = getPermissionStatus()
             permissionResult?.success(status)
             permissionResult = null
+        } else if (requestCode == AUDIO_PERMISSION_REQUEST_CODE) {
+            val sharedPrefs = getSharedPreferences("veil_player_prefs", Context.MODE_PRIVATE)
+            sharedPrefs.edit().putBoolean("has_requested_audio_permissions", true).apply()
+
+            val status = getAudioPermissionStatus()
+            audioPermissionResult?.success(status)
+            audioPermissionResult = null
         }
     }
 
-    private fun openSettings() {
-        val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
+    private fun getAudioPermissionStatus(): String {
+        val context = this
+        val sharedPrefs = getSharedPreferences("veil_player_prefs", Context.MODE_PRIVATE)
+        val hasRequested = sharedPrefs.getBoolean("has_requested_audio_permissions", false)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && android.os.Environment.isExternalStorageManager()) {
+            return "granted"
         }
-        startActivity(intent)
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
+            val hasAudio = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+            when {
+                hasAudio -> "granted"
+                else -> {
+                    val shouldShowAudio = ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.READ_MEDIA_AUDIO)
+                    if (!shouldShowAudio && hasRequested) {
+                        "permanently_denied"
+                    } else {
+                        "denied"
+                    }
+                }
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13
+            val hasAudio = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+            when {
+                hasAudio -> "granted"
+                else -> {
+                    if (!ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.READ_MEDIA_AUDIO) && hasRequested) {
+                        "permanently_denied"
+                    } else {
+                        "denied"
+                    }
+                }
+            }
+        } else { // Android 12 and below
+            val hasStorage = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            when {
+                hasStorage -> "granted"
+                else -> {
+                    if (!ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.READ_EXTERNAL_STORAGE) && hasRequested) {
+                        "permanently_denied"
+                    } else {
+                        "denied"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun requestAudioPermissions(result: MethodChannel.Result) {
+        if (audioPermissionResult != null) {
+            result.error("ALREADY_REQUESTING", "Audio permission request already in progress", null)
+            return
+        }
+        audioPermissionResult = result
+
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else {
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        ActivityCompat.requestPermissions(this, permissions, AUDIO_PERMISSION_REQUEST_CODE)
+    }
+
+    private fun openSettings(result: MethodChannel.Result) {
+        if (pendingSettingsResult != null) {
+            val old = pendingSettingsResult
+            pendingSettingsResult = null
+            try { old?.success(true) } catch (_: Exception) {}
+        }
+        pendingSettingsResult = result
+        try {
+            val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            }
+            startActivityForResult(intent, SETTINGS_REQUEST_CODE)
+        } catch (e: Exception) {
+            pendingSettingsResult = null
+            result.error("OPEN_SETTINGS_FAILED", e.message, null)
+        }
     }
 
     private fun getVideos(limit: Int, offset: Int, folderName: String?, folderPath: String?, result: MethodChannel.Result) {
         thread {
             try {
+                val prefs = getSharedPreferences("veil_playback_history", Context.MODE_PRIVATE)
+                val watchedIds = prefs.getStringSet("watched_ids", emptySet()) ?: emptySet()
+
                 val videoList = ArrayList<Map<String, Any?>>()
                 val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
 
@@ -826,6 +1037,7 @@ class MainActivity : FlutterActivity() {
                         videoItem["size"] = size
                         videoItem["dateAdded"] = dateAdded
                         videoItem["folderName"] = folder
+                        videoItem["isWatched"] = watchedIds.contains(id.toString())
 
                         videoList.add(videoItem)
                     }
@@ -845,9 +1057,13 @@ class MainActivity : FlutterActivity() {
     private fun getFolders(result: MethodChannel.Result) {
         thread {
             try {
+                val prefs = getSharedPreferences("veil_playback_history", Context.MODE_PRIVATE)
+                val watchedIds = prefs.getStringSet("watched_ids", emptySet()) ?: emptySet()
+
                 val foldersMap = LinkedHashMap<String, FolderInfo>()
                 val uri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                 val projection = arrayOf(
+                    MediaStore.Video.Media._ID,
                     MediaStore.Video.Media.DATA,
                     MediaStore.Video.Media.DURATION,
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -859,6 +1075,7 @@ class MainActivity : FlutterActivity() {
 
                 val cursor = contentResolver.query(uri, projection, null, null, null)
                 cursor?.use {
+                    val idCol = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                     val pathCol = it.getColumnIndexOrThrow(MediaStore.Video.Media.DATA)
                     val durationCol = it.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
                     val bucketCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -868,6 +1085,8 @@ class MainActivity : FlutterActivity() {
                     }
 
                     while (it.moveToNext()) {
+                        val idStr = it.getLong(idCol).toString()
+                        val isWatched = watchedIds.contains(idStr)
                         val path = it.getString(pathCol) ?: ""
                         val duration = it.getLong(durationCol)
                         if (path.isEmpty()) continue
@@ -889,8 +1108,22 @@ class MainActivity : FlutterActivity() {
                         }
 
                         val nameLower = folderName.lowercase()
+                        val pathLower = folderPath.lowercase()
+                        
+                        // Ignore hidden folders, cache, temp, thumbnail, android/data, gif, sticker
+                        if (nameLower.startsWith(".") || pathLower.contains("/.") || 
+                            nameLower.contains("cache") || pathLower.contains("/cache/") ||
+                            nameLower.contains("temp") || pathLower.contains("/temp/") ||
+                            nameLower.contains("thumbnail") || pathLower.contains("/thumbnail/") ||
+                            pathLower.contains("/android/data/") ||
+                            nameLower.contains("gif") || pathLower.contains("/gif/") ||
+                            nameLower.contains("sticker") || pathLower.contains("/sticker/")) {
+                            continue
+                        }
+
                         val isMovieName = nameLower.contains("movie") || nameLower.contains("film") || nameLower.contains("cinema")
                         val isLongVideo = duration > 60 * 60 * 1000 // > 60 minutes
+                        val isShortClip = duration > 0 && duration < 3500 // less than 3.5 seconds
 
                         val existing = foldersMap[folderPath]
                         if (existing == null) {
@@ -898,12 +1131,20 @@ class MainActivity : FlutterActivity() {
                                 name = folderName,
                                 path = folderPath,
                                 count = 1,
-                                containsMovies = isMovieName || isLongVideo
+                                newVideosCount = if (isWatched) 0 else 1,
+                                containsMovies = isMovieName || isLongVideo,
+                                shortClipsCount = if (isShortClip) 1 else 0
                             )
                         } else {
                             existing.count += 1
+                            if (!isWatched) {
+                                existing.newVideosCount += 1
+                            }
                             if (isMovieName || isLongVideo) {
                                 existing.containsMovies = true
+                            }
+                            if (isShortClip) {
+                                existing.shortClipsCount += 1
                             }
                         }
                     }
@@ -911,10 +1152,15 @@ class MainActivity : FlutterActivity() {
 
                 val folderList = ArrayList<Map<String, Any>>()
                 for (info in foldersMap.values) {
+                    if (info.count > 0 && info.count == info.shortClipsCount) {
+                        // Exclude folders that ONLY contain short clips (GIFs)
+                        continue
+                    }
                     val item = HashMap<String, Any>()
                     item["name"] = info.name
                     item["path"] = info.path
                     item["count"] = info.count
+                    item["newVideosCount"] = info.newVideosCount
                     item["containsMovies"] = info.containsMovies
                     folderList.add(item)
                 }
@@ -925,6 +1171,345 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 runOnUiThread {
                     result.error("QUERY_FAILED", e.message, null)
+                }
+            }
+        }
+    }
+
+    private fun getAudioTracks(
+        limit: Int,
+        offset: Int,
+        folderName: String?,
+        folderPath: String?,
+        result: MethodChannel.Result
+    ) {
+        thread {
+            try {
+                val audioList = ArrayList<Map<String, Any?>>()
+                val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+
+                val projection = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.TITLE,
+                    MediaStore.Audio.Media.ARTIST,
+                    MediaStore.Audio.Media.ALBUM,
+                    MediaStore.Audio.Media.ALBUM_ID,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DATE_ADDED,
+                    MediaStore.Audio.Media.TRACK,
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        MediaStore.Audio.Media.BUCKET_DISPLAY_NAME
+                    } else {
+                        "bucket_display_name"
+                    }
+                )
+
+                val baseSelection = "${MediaStore.Audio.Media.DURATION} > 0 AND ${MediaStore.Audio.Media.SIZE} > 0"
+                var selection = baseSelection
+                var selectionArgs: Array<String>? = null
+                var canonicalFolder: String? = null
+
+                if (folderPath != null) {
+                    try {
+                        canonicalFolder = File(folderPath).canonicalPath
+                    } catch (e: Exception) {
+                        canonicalFolder = folderPath
+                    }
+                    val fName = File(folderPath).name
+                    if (fName.isNotEmpty()) {
+                        selection = "$baseSelection AND ${MediaStore.Audio.Media.DATA} LIKE ?"
+                        selectionArgs = arrayOf("%/$fName/%")
+                    }
+                } else if (folderName != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        selection = "$baseSelection AND ${MediaStore.Audio.Media.BUCKET_DISPLAY_NAME} = ?"
+                        selectionArgs = arrayOf(folderName)
+                    } else {
+                        selection = "$baseSelection AND ${MediaStore.Audio.Media.DATA} LIKE ?"
+                        selectionArgs = arrayOf("%/$folderName/%")
+                    }
+                }
+
+                val cursor = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val queryArgs = Bundle().apply {
+                        putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+                        putInt(ContentResolver.QUERY_ARG_OFFSET, offset)
+                        if (folderPath != null || folderName != null) {
+                            putStringArray(
+                                ContentResolver.QUERY_ARG_SORT_COLUMNS,
+                                arrayOf(MediaStore.Audio.Media.TITLE)
+                            )
+                            putInt(
+                                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                                ContentResolver.QUERY_SORT_DIRECTION_ASCENDING
+                            )
+                        } else {
+                            putStringArray(
+                                ContentResolver.QUERY_ARG_SORT_COLUMNS,
+                                arrayOf(MediaStore.Audio.Media.DATE_ADDED)
+                            )
+                            putInt(
+                                ContentResolver.QUERY_ARG_SORT_DIRECTION,
+                                ContentResolver.QUERY_SORT_DIRECTION_DESCENDING
+                            )
+                        }
+                        putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                        if (selectionArgs != null) {
+                            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, selectionArgs)
+                        }
+                    }
+                    contentResolver.query(uri, projection, queryArgs, null)
+                } else {
+                    val sortOrder = if (folderPath != null || folderName != null) {
+                        "${MediaStore.Audio.Media.TITLE} ASC LIMIT $limit OFFSET $offset"
+                    } else {
+                        "${MediaStore.Audio.Media.DATE_ADDED} DESC LIMIT $limit OFFSET $offset"
+                    }
+                    contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
+                }
+
+                cursor?.use {
+                    val idCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleCol = it.getColumnIndex(MediaStore.Audio.Media.TITLE)
+                    val artistCol = it.getColumnIndex(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = it.getColumnIndex(MediaStore.Audio.Media.ALBUM)
+                    val albumIdCol = it.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
+                    val pathCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    val durationCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val sizeCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                    val dateCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                    val trackCol = it.getColumnIndex(MediaStore.Audio.Media.TRACK)
+                    val nameCol = it.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val bucketCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        it.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                    } else {
+                        it.getColumnIndex("bucket_display_name")
+                    }
+
+                    while (it.moveToNext()) {
+                        val id = it.getLong(idCol)
+                        val path = it.getString(pathCol) ?: ""
+                        if (path.isEmpty()) continue
+
+                        val pathLower = path.lowercase()
+                        // Exclude hidden files and directories, cache, temp, Android system app data
+                        if (pathLower.contains("/.") ||
+                            pathLower.contains("/cache/") ||
+                            pathLower.contains("/temp/") ||
+                            pathLower.contains("/android/data/") ||
+                            pathLower.contains("/android/obb/")) {
+                            continue
+                        }
+
+                        // Filter by exact parent folder if folderPath is specified
+                        if (canonicalFolder != null) {
+                            val normFolder = canonicalFolder.replace("\\", "/").lowercase()
+                            try {
+                                val parentCanonical = File(path).parentFile?.canonicalPath ?: ""
+                                val normParent = parentCanonical.replace("\\", "/").lowercase()
+                                if (normParent != normFolder) {
+                                    continue
+                                }
+                            } catch (e: Exception) {
+                                val parentAbsolute = File(path).parentFile?.absolutePath ?: ""
+                                val normParent = parentAbsolute.replace("\\", "/").lowercase()
+                                val normFolderPath = (folderPath ?: "").replace("\\", "/").lowercase()
+                                if (normParent != normFolderPath) {
+                                    continue
+                                }
+                            }
+                        }
+
+                        val file = File(path)
+                        val parentFile = file.parentFile
+                        val actualFolderPath = parentFile?.absolutePath ?: ""
+
+                        var folderNameStr = ""
+                        if (bucketCol != -1) {
+                            folderNameStr = it.getString(bucketCol) ?: ""
+                        }
+                        if (folderNameStr.isEmpty()) {
+                            folderNameStr = parentFile?.name ?: ""
+                        }
+                        if (folderNameStr.isEmpty()) {
+                            folderNameStr = "Music"
+                        }
+
+                        val rawTitle = if (titleCol != -1) it.getString(titleCol) else null
+                        val displayName = if (nameCol != -1) it.getString(nameCol) else null
+                        val title = when {
+                            !rawTitle.isNullOrBlank() -> rawTitle.trim()
+                            !displayName.isNullOrBlank() -> displayName.substringBeforeLast('.').trim()
+                            else -> file.nameWithoutExtension.ifBlank { "Unknown Track" }
+                        }
+
+                        val rawArtist = if (artistCol != -1) it.getString(artistCol) else null
+                        val artist = if (rawArtist.isNullOrBlank() || rawArtist.equals("<unknown>", ignoreCase = true)) {
+                            "Unknown Artist"
+                        } else {
+                            rawArtist.trim()
+                        }
+
+                        val rawAlbum = if (albumCol != -1) it.getString(albumCol) else null
+                        val album = if (rawAlbum.isNullOrBlank() || rawAlbum.equals("<unknown>", ignoreCase = true)) {
+                            "Unknown Album"
+                        } else {
+                            rawAlbum.trim()
+                        }
+
+                        val albumId = if (albumIdCol != -1) it.getLong(albumIdCol) else -1L
+                        val albumArtUri = if (albumId > 0) {
+                            "content://media/external/audio/albumart/$albumId"
+                        } else {
+                            null
+                        }
+
+                        val duration = it.getLong(durationCol)
+                        val size = it.getLong(sizeCol)
+                        val dateAdded = it.getLong(dateCol)
+
+                        val rawTrack = if (trackCol != -1) it.getInt(trackCol) else 0
+                        val trackNumber = when {
+                            rawTrack >= 1000 -> rawTrack % 1000
+                            rawTrack > 0 -> rawTrack
+                            else -> null
+                        }
+
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id).toString()
+
+                        val audioItem = HashMap<String, Any?>()
+                        audioItem["id"] = id.toString()
+                        audioItem["title"] = title
+                        audioItem["artist"] = artist
+                        audioItem["album"] = album
+                        audioItem["albumId"] = if (albumId > 0) albumId.toString() else null
+                        audioItem["albumArtUri"] = albumArtUri
+                        audioItem["path"] = path
+                        audioItem["contentUri"] = contentUri
+                        audioItem["duration"] = duration
+                        audioItem["size"] = size
+                        audioItem["dateAdded"] = dateAdded
+                        audioItem["trackNumber"] = trackNumber
+                        audioItem["folderName"] = folderNameStr
+                        audioItem["folderPath"] = actualFolderPath
+
+                        audioList.add(audioItem)
+                    }
+                }
+
+                runOnUiThread {
+                    result.success(audioList)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("AUDIO_QUERY_FAILED", e.message, null)
+                }
+            }
+        }
+    }
+
+    private fun getAudioFolders(result: MethodChannel.Result) {
+        thread {
+            try {
+                val foldersMap = LinkedHashMap<String, AudioFolderInfo>()
+                val uri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                val projection = arrayOf(
+                    MediaStore.Audio.Media._ID,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.DURATION,
+                    MediaStore.Audio.Media.SIZE,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        MediaStore.Audio.Media.BUCKET_DISPLAY_NAME
+                    } else {
+                        "bucket_display_name"
+                    }
+                )
+
+                val selection = "${MediaStore.Audio.Media.DURATION} > 0 AND ${MediaStore.Audio.Media.SIZE} > 0"
+                val cursor = contentResolver.query(uri, projection, selection, null, null)
+
+                cursor?.use {
+                    val pathCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    val durationCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val sizeCol = it.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                    val bucketCol = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        it.getColumnIndex(MediaStore.Audio.Media.BUCKET_DISPLAY_NAME)
+                    } else {
+                        it.getColumnIndex("bucket_display_name")
+                    }
+
+                    while (it.moveToNext()) {
+                        val path = it.getString(pathCol) ?: ""
+                        if (path.isEmpty()) continue
+
+                        val duration = it.getLong(durationCol)
+                        val size = it.getLong(sizeCol)
+
+                        val file = File(path)
+                        val parentFile = file.parentFile
+                        val folderPath = parentFile?.absolutePath ?: ""
+                        if (folderPath.isEmpty()) continue
+
+                        var folderName = ""
+                        if (bucketCol != -1) {
+                            folderName = it.getString(bucketCol) ?: ""
+                        }
+                        if (folderName.isEmpty()) {
+                            folderName = parentFile?.name ?: ""
+                        }
+                        if (folderName.isEmpty()) {
+                            folderName = "Music"
+                        }
+
+                        val nameLower = folderName.lowercase()
+                        val pathLower = folderPath.lowercase()
+
+                        // Ignore hidden folders, cache, temp, thumbnail, android/data
+                        if (nameLower.startsWith(".") || pathLower.contains("/.") ||
+                            nameLower.contains("cache") || pathLower.contains("/cache/") ||
+                            nameLower.contains("temp") || pathLower.contains("/temp/") ||
+                            pathLower.contains("/android/data/") ||
+                            pathLower.contains("/android/obb/")) {
+                            continue
+                        }
+
+                        val existing = foldersMap[folderPath]
+                        if (existing == null) {
+                            foldersMap[folderPath] = AudioFolderInfo(
+                                name = folderName,
+                                path = folderPath,
+                                count = 1,
+                                totalDuration = duration,
+                                totalSize = size
+                            )
+                        } else {
+                            existing.count += 1
+                            existing.totalDuration += duration
+                            existing.totalSize += size
+                        }
+                    }
+                }
+
+                val folderList = ArrayList<Map<String, Any>>()
+                for (info in foldersMap.values) {
+                    val item = HashMap<String, Any>()
+                    item["name"] = info.name
+                    item["path"] = info.path
+                    item["count"] = info.count
+                    item["totalDuration"] = info.totalDuration
+                    item["totalSize"] = info.totalSize
+                    folderList.add(item)
+                }
+
+                runOnUiThread {
+                    result.success(folderList)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    result.error("AUDIO_FOLDERS_QUERY_FAILED", e.message, null)
                 }
             }
         }
@@ -1006,7 +1591,7 @@ class MainActivity : FlutterActivity() {
                 newIds.add(videoId)
                 editor.putStringSet("watched_ids", newIds)
 
-                editor.apply()
+                editor.commit()
                 runOnUiThread {
                     result.success(true)
                 }
@@ -1050,7 +1635,7 @@ class MainActivity : FlutterActivity() {
                         val ts = prefs.getLong("${id}_timestamp", 0L)
 
                         val progress = if (dur > 0) pos.toDouble() / dur else 0.0
-                        if (progress < 0.95 && pos > 1000) {
+                        if (progress < 0.95 && pos >= 0) {
                             val map = HashMap<String, Any>()
                             map["id"] = id
                             map["position"] = pos
@@ -1359,6 +1944,36 @@ class MainActivity : FlutterActivity() {
                     runOnUiThread { res.success(false) }
                 }
             }
+        } else if (requestCode == SETTINGS_REQUEST_CODE) {
+            val res = pendingSettingsResult
+            pendingSettingsResult = null
+            if (res != null) {
+                runOnUiThread { res.success(true) }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingSettingsResult != null) {
+            val res = pendingSettingsResult
+            pendingSettingsResult = null
+            runOnUiThread {
+                try {
+                    res?.success(true)
+                } catch (_: Exception) {}
+            }
+        }
+        if (pendingManageStorageResult != null) {
+            val res = pendingManageStorageResult
+            pendingManageStorageResult = null
+            val granted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                android.os.Environment.isExternalStorageManager()
+            runOnUiThread {
+                try {
+                    res?.success(granted)
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -1472,12 +2087,16 @@ class MainActivity : FlutterActivity() {
                     "bucket_display_name"
                 }
 
-                val selection = "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ? OR $bucketColName LIKE ?"
-                val selectionArgs = arrayOf("%$query%", "%$query%")
+                val cleanQuery = query.trim()
+                val flexQuery = "%" + cleanQuery.replace(Regex("[._\\-\\s]+"), "%") + "%"
+                val literalQuery = "%$cleanQuery%"
+
+                val selection = "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ? OR $bucketColName LIKE ? OR ${MediaStore.Video.Media.DATA} LIKE ? OR ${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf(literalQuery, literalQuery, flexQuery, flexQuery)
 
                 val cursor = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     val queryArgs = Bundle().apply {
-                        putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+                        putInt(ContentResolver.QUERY_ARG_LIMIT, limit * 2)
                         putStringArray(
                             ContentResolver.QUERY_ARG_SORT_COLUMNS,
                             arrayOf(MediaStore.Video.Media.DATE_ADDED)
@@ -1491,9 +2110,11 @@ class MainActivity : FlutterActivity() {
                     }
                     contentResolver.query(uri, projection, queryArgs, null)
                 } else {
-                    val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC LIMIT $limit"
+                    val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC LIMIT ${limit * 2}"
                     contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
                 }
+
+                val normQuery = cleanQuery.replace(Regex("[._\\-\\s]+"), "").lowercase()
 
                 cursor?.use {
                     val idCol = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
@@ -1509,12 +2130,28 @@ class MainActivity : FlutterActivity() {
                     }
 
                     while (it.moveToNext()) {
+                        if (videoList.size >= limit) break
+
                         val id = it.getLong(idCol)
                         val title = it.getString(nameCol) ?: ""
                         val path = it.getString(pathCol) ?: ""
                         val duration = it.getLong(durationCol)
                         val size = it.getLong(sizeCol)
                         val dateAdded = it.getLong(dateCol)
+
+                        if (path.isEmpty()) continue
+                        val pathLower = path.lowercase()
+
+                        // Ignore junk folders during search
+                        if (pathLower.contains("/.") || 
+                            pathLower.contains("/cache/") ||
+                            pathLower.contains("/temp/") || pathLower.contains("/tmp/") ||
+                            pathLower.contains("/thumbnail/") || pathLower.contains("/.thumbnails/") ||
+                            pathLower.contains("/android/data/") ||
+                            pathLower.contains("whatsapp animated gifs") ||
+                            pathLower.contains("whatsapp stickers")) {
+                            continue
+                        }
 
                         var folder = ""
                         if (bucketCol != -1) {
@@ -1530,6 +2167,17 @@ class MainActivity : FlutterActivity() {
                         }
                         if (folder.isEmpty()) {
                             folder = "Storage"
+                        }
+
+                        // Normalized fuzzy match check
+                        if (normQuery.isNotEmpty()) {
+                            val normTitle = title.replace(Regex("[._\\-\\s]+"), "").lowercase()
+                            val normPath = path.replace(Regex("[._\\-\\s]+"), "").lowercase()
+                            val normFolder = folder.replace(Regex("[._\\-\\s]+"), "").lowercase()
+
+                            if (!normTitle.contains(normQuery) && !normPath.contains(normQuery) && !normFolder.contains(normQuery)) {
+                                continue
+                            }
                         }
 
                         val videoItem = HashMap<String, Any?>()
@@ -1763,6 +2411,218 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread {
                     result.error("BATCH_DELETE_FAILED", e.message, null)
                 }
+            }
+        }
+    }
+
+    private fun getUniqueFile(dir: File, fileName: String): File {
+        var file = File(dir, fileName)
+        if (!file.exists()) return file
+        val dotIndex = fileName.lastIndexOf('.')
+        val baseName = if (dotIndex > 0) fileName.substring(0, dotIndex) else fileName
+        val extension = if (dotIndex > 0) fileName.substring(dotIndex) else ""
+        var counter = 1
+        while (file.exists()) {
+            file = File(dir, "$baseName ($counter)$extension")
+            counter++
+        }
+        return file
+    }
+
+    private fun copyVideoFileInternal(sourceFile: File, targetFile: File): Boolean {
+        return try {
+            sourceFile.inputStream().channel.use { inChannel ->
+                targetFile.outputStream().channel.use { outChannel ->
+                    inChannel.transferTo(0, inChannel.size(), outChannel)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            try {
+                sourceFile.inputStream().use { input ->
+                    targetFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                true
+            } catch (ex: Exception) {
+                false
+            }
+        }
+    }
+
+    private fun copyVideo(sourcePath: String, targetFolder: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val sourceFile = File(sourcePath)
+                if (!sourceFile.exists() || !sourceFile.isFile) {
+                    runOnUiThread { result.error("FILE_NOT_FOUND", "Source video does not exist", null) }
+                    return@thread
+                }
+                val targetDir = File(targetFolder)
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+                val targetFile = getUniqueFile(targetDir, sourceFile.name)
+                val copied = copyVideoFileInternal(sourceFile, targetFile)
+                if (copied) {
+                    scanFiles(arrayOf(targetFile.absolutePath)) {
+                        runOnUiThread { result.success("success") }
+                    }
+                } else {
+                    runOnUiThread { result.error("COPY_FAILED", "Failed to copy video", null) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("COPY_FAILED", e.message, null) }
+            }
+        }
+    }
+
+    private fun moveVideo(videoId: String, sourcePath: String, targetFolder: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val sourceFile = File(sourcePath)
+                if (!sourceFile.exists() || !sourceFile.isFile) {
+                    runOnUiThread { result.error("FILE_NOT_FOUND", "Source video does not exist", null) }
+                    return@thread
+                }
+                val targetDir = File(targetFolder)
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+
+                if (sourceFile.parentFile?.canonicalPath == targetDir.canonicalPath) {
+                    runOnUiThread { result.error("SAME_FOLDER", "Source and destination are the same folder", null) }
+                    return@thread
+                }
+
+                val targetFile = getUniqueFile(targetDir, sourceFile.name)
+                var moved = false
+                try {
+                    moved = sourceFile.renameTo(targetFile)
+                } catch (e: Exception) {}
+
+                if (!moved) {
+                    if (copyVideoFileInternal(sourceFile, targetFile)) {
+                        try {
+                            sourceFile.delete()
+                        } catch (e: Exception) {}
+                        moved = true
+                    }
+                }
+
+                if (moved) {
+                    try {
+                        val prefs = getSharedPreferences("veil_playback_history", Context.MODE_PRIVATE)
+                        if (prefs.contains("${videoId}_path")) {
+                            prefs.edit().putString("${videoId}_path", targetFile.absolutePath).commit()
+                        }
+                    } catch (e: Exception) {}
+
+                    scanFiles(arrayOf(sourcePath, targetFile.absolutePath)) {
+                        runOnUiThread { result.success("success") }
+                    }
+                } else {
+                    runOnUiThread { result.error("MOVE_FAILED", "Failed to move video", null) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("MOVE_FAILED", e.message, null) }
+            }
+        }
+    }
+
+    private fun copyVideosBatch(paths: List<String>, targetFolder: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val targetDir = File(targetFolder)
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+                val scannedPaths = ArrayList<String>()
+                for (path in paths) {
+                    val sourceFile = File(path)
+                    if (sourceFile.exists() && sourceFile.isFile) {
+                        val targetFile = getUniqueFile(targetDir, sourceFile.name)
+                        if (copyVideoFileInternal(sourceFile, targetFile)) {
+                            scannedPaths.add(targetFile.absolutePath)
+                        }
+                    }
+                }
+                if (scannedPaths.isNotEmpty()) {
+                    scanFiles(scannedPaths.toTypedArray()) {
+                        runOnUiThread { result.success("success") }
+                    }
+                } else {
+                    runOnUiThread {
+                        if (paths.isEmpty()) result.success("success")
+                        else result.error("COPY_FAILED", "No files were copied", null)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("COPY_FAILED", e.message, null) }
+            }
+        }
+    }
+
+    private fun moveVideosBatch(videoIds: List<String>, paths: List<String>, targetFolder: String, result: MethodChannel.Result) {
+        thread {
+            try {
+                val targetDir = File(targetFolder)
+                if (!targetDir.exists()) {
+                    targetDir.mkdirs()
+                }
+                val scannedPaths = ArrayList<String>()
+                val prefs = getSharedPreferences("veil_playback_history", Context.MODE_PRIVATE)
+                val editor = prefs.edit()
+
+                for (i in paths.indices) {
+                    val path = paths[i]
+                    val id = if (i < videoIds.size) videoIds[i] else ""
+                    val sourceFile = File(path)
+                    if (sourceFile.exists() && sourceFile.isFile) {
+                        if (sourceFile.parentFile?.canonicalPath == targetDir.canonicalPath) {
+                            continue
+                        }
+                        val targetFile = getUniqueFile(targetDir, sourceFile.name)
+                        var moved = false
+                        try {
+                            moved = sourceFile.renameTo(targetFile)
+                        } catch (e: Exception) {}
+
+                        if (!moved) {
+                            if (copyVideoFileInternal(sourceFile, targetFile)) {
+                                try {
+                                    sourceFile.delete()
+                                } catch (e: Exception) {}
+                                moved = true
+                            }
+                        }
+
+                        if (moved) {
+                            scannedPaths.add(path)
+                            scannedPaths.add(targetFile.absolutePath)
+                            if (id.isNotEmpty() && prefs.contains("${id}_path")) {
+                                editor.putString("${id}_path", targetFile.absolutePath)
+                            }
+                        }
+                    }
+                }
+                try {
+                    editor.commit()
+                } catch (e: Exception) {}
+
+                if (scannedPaths.isNotEmpty()) {
+                    scanFiles(scannedPaths.toTypedArray()) {
+                        runOnUiThread { result.success("success") }
+                    }
+                } else {
+                    runOnUiThread {
+                        if (paths.isEmpty()) result.success("success")
+                        else result.error("MOVE_FAILED", "No files were moved", null)
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("MOVE_FAILED", e.message, null) }
             }
         }
     }
@@ -2173,33 +3033,34 @@ class MainActivity : FlutterActivity() {
     private fun updateActiveMediaSession(title: String, isPlaying: Boolean, position: Long, duration: Long) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(NOTIFICATION_ID)
+
                 val session = mediaSession ?: MediaSession(this, "VeilPlayerMediaSession").apply {
                     setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+                    setCallback(mediaSessionCallback)
                     mediaSession = this
                 }
                 
-                val stateBuilder = PlaybackState.Builder()
-                    .setActions(
-                        PlaybackState.ACTION_PLAY or
-                        PlaybackState.ACTION_PAUSE or
-                        PlaybackState.ACTION_PLAY_PAUSE or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or
-                        PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackState.ACTION_SEEK_TO
-                    )
-
-                val state = if (isPlaying) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
-                stateBuilder.setState(state, position, if (isPlaying) 1.0f else 0.0f)
-                session.setPlaybackState(stateBuilder.build())
-
-                val metadata = android.media.MediaMetadata.Builder()
-                    .putString(android.media.MediaMetadata.METADATA_KEY_TITLE, title)
-                    .putLong(android.media.MediaMetadata.METADATA_KEY_DURATION, duration)
-                    .build()
-                session.setMetadata(metadata)
-                
-                if (!session.isActive) {
-                    session.isActive = true
+                if (title.isEmpty() || !isPlaying) {
+                    if (session.isActive) {
+                        session.isActive = false
+                    }
+                    val stateBuilder = PlaybackState.Builder()
+                        .setActions(
+                            PlaybackState.ACTION_PLAY or
+                            PlaybackState.ACTION_PAUSE or
+                            PlaybackState.ACTION_PLAY_PAUSE or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackState.ACTION_SEEK_TO
+                        )
+                        .setState(PlaybackState.STATE_STOPPED, position, 0.0f)
+                    session.setPlaybackState(stateBuilder.build())
+                } else {
+                    if (session.isActive) {
+                        session.isActive = false
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -2489,6 +3350,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        setSessionActive(false)
         try {
             unregisterReceiver(notificationReceiver)
         } catch (e: Exception) {}
@@ -2496,6 +3358,14 @@ class MainActivity : FlutterActivity() {
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.cancel(NOTIFICATION_ID)
         } catch (e: Exception) {}
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (notificationManager.isNotificationPolicyAccessGranted && originalInterruptionFilter != null) {
+                    notificationManager.setInterruptionFilter(originalInterruptionFilter!!)
+                }
+            } catch (e: Exception) {}
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             mediaSession?.release()
         }
@@ -2503,5 +3373,104 @@ class MainActivity : FlutterActivity() {
             trimThumbnailCache()
         }
         super.onDestroy()
+    }
+
+    private fun setFocusModeEnabled(enable: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (notificationManager.isNotificationPolicyAccessGranted) {
+                try {
+                    if (enable) {
+                        if (originalInterruptionFilter == null) {
+                            originalInterruptionFilter = notificationManager.currentInterruptionFilter
+                        }
+                        notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                    } else {
+                        originalInterruptionFilter?.let { filter ->
+                            notificationManager.setInterruptionFilter(filter)
+                        }
+                        originalInterruptionFilter = null
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun getDeviceInfo(result: MethodChannel.Result) {
+        try {
+            val context = this
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            val versionName = packageInfo.versionName ?: "1.0.0"
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode.toString()
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toString()
+            }
+            val map = HashMap<String, String>()
+            map["manufacturer"] = Build.MANUFACTURER ?: "Unknown"
+            map["model"] = Build.MODEL ?: "Unknown"
+            map["android_version"] = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+            map["sdk_int"] = Build.VERSION.SDK_INT.toString()
+            map["arch"] = if (Build.SUPPORTED_ABIS.isNotEmpty()) Build.SUPPORTED_ABIS[0] else "arm64-v8a"
+            map["app_version"] = versionName
+            map["build_number"] = versionCode
+            result.success(map)
+        } catch (e: Exception) {
+            result.error("DEVICE_INFO_FAILED", e.message, null)
+        }
+    }
+
+    private fun shareReportFile(path: String, title: String, result: MethodChannel.Result) {
+        try {
+            val file = File(path)
+            if (!file.exists()) {
+                result.error("FILE_NOT_FOUND", "Report file does not exist", null)
+                return
+            }
+
+            val contentUri: Uri = try {
+                androidx.core.content.FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    file
+                )
+            } catch (e: Exception) {
+                Uri.fromFile(file)
+            }
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, contentUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+
+            val chooser = Intent.createChooser(shareIntent, title)
+            startActivity(chooser)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("SHARE_REPORT_FAILED", e.message, null)
+        }
+    }
+
+    private fun setSessionActive(active: Boolean) {
+        try {
+            val prefs = getSharedPreferences("veil_player_settings", Context.MODE_PRIVATE)
+            prefs.edit().putBoolean("session_active", active).commit()
+        } catch (e: Exception) {
+            // ignore
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        setSessionActive(false)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        setSessionActive(false)
     }
 }

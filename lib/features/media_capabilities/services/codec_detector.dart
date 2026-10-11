@@ -106,9 +106,7 @@ class CodecDetector {
     if (platform == null) return null;
     try {
       final value = (platform as dynamic).getProperty(property) as String?;
-      if (value == null ||
-          value.isEmpty ||
-          value == 'no' && property == 'hwdec-current') {
+      if (value == null || value.isEmpty || value == 'no' && property == 'hwdec-current') {
         return null;
       }
       return value;
