@@ -57,3 +57,13 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# Keystores, signing keys, and secrets
+*.keystore
+*.jks
+*.p12
+*.pem
+*.key
+.env
+.env.*
+*.secret
